@@ -4,6 +4,7 @@ import { X, Save, Download, Upload, Sparkles, Key, FileJson, Bell, MessageSquare
 import { collection, query, orderBy, limit, getDocs, doc, updateDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { saveGeminiModel, getGeminiModel, getNextGeminiKey } from '../utils/adaptiveRateLimit'
+import { defaultCVData } from '../utils/defaultData'
 import type { CVData } from '../types/cv'
 import type { Lang } from '../i18n/translations'
 
@@ -81,6 +82,7 @@ export default function AdminPanel({ open, onClose, data, onUpdate, lang }: Prop
   const [aiLoading, setAiLoading]     = useState(false)
   const [aiStatus, setAiStatus]       = useState('')
   const [aiPreview, setAiPreview]     = useState<{ en: CVData; es: CVData; explanations: AiChange[] } | null>(null)
+  const [selectedChanges, setSelectedChanges] = useState<Set<number>>(new Set())
   const [prevJson, setPrevJson]       = useState<string | null>(null)
   const [savedSuggestions, setSavedSuggestions] = useState<SavedSuggestion[]>(
     () => JSON.parse(localStorage.getItem('ai_suggestions') ?? '[]')
@@ -252,6 +254,8 @@ Return only the JSON object described above.`
           const cleaned = text.replace(/```json|```/g, '').trim()
           const parsed = JSON.parse(cleaned) as { en: CVData; es: CVData; explanations: AiChange[] }
           setAiPreview(parsed)
+          // Pre-select all changes so Apply Selected works immediately
+          setSelectedChanges(new Set(parsed.explanations.map((_, i) => i)))
           setAiStatus('Review the proposal below before applying.')
           setAiLoading(false)
           return // success
@@ -265,31 +269,83 @@ Return only the JSON object described above.`
     setAiLoading(false)
   }, [jobDesc, json, lang, onUpdate])
 
-  const handleApplyPreview = useCallback((langs: ('en' | 'es')[]) => {
+  // Resolve a dot-bracket field path on an object (read or write)
+  const getPath = (obj: Record<string, unknown>, path: string): unknown => {
+    const parts = path.replace(/\[(\d+)\]/g, '.$1').split('.')
+    return parts.reduce<unknown>((cur, p) => (cur != null && typeof cur === 'object' ? (cur as Record<string, unknown>)[p] : undefined), obj)
+  }
+  const setPath = (obj: Record<string, unknown>, path: string, value: unknown): void => {
+    const parts = path.replace(/\[(\d+)\]/g, '.$1').split('.')
+    let cur: Record<string, unknown> = obj
+    for (let i = 0; i < parts.length - 1; i++) {
+      const p = parts[i]
+      if (cur[p] == null || typeof cur[p] !== 'object') cur[p] = isNaN(Number(parts[i + 1])) ? {} : []
+      cur = cur[p] as Record<string, unknown>
+    }
+    cur[parts[parts.length - 1]] = value
+  }
+
+  const handleApplyPreview = useCallback((indexes: 'all' | Set<number>) => {
     if (!aiPreview) return
     setPrevJson(json)
-    if (langs.includes('en')) {
-      const enStr = JSON.stringify(aiPreview.en, null, 2)
-      localStorage.setItem('cv_data_en', enStr)
-      if (lang === 'en') { setJson(enStr); onUpdate(aiPreview.en) }
+
+    const toApply = indexes === 'all'
+      ? aiPreview.explanations.map((_, i) => i)
+      : [...indexes]
+
+    // Deep clone current CVs to merge into
+    const currentEn = JSON.parse(localStorage.getItem('cv_data_en') ?? JSON.stringify(defaultCVData['en'])) as CVData
+    const currentEs = JSON.parse(localStorage.getItem('cv_data_es') ?? JSON.stringify(defaultCVData['es'])) as CVData
+
+    if (toApply.length === 0) {
+      // Nothing selected — do nothing silently
+      setAiStatus('No changes selected.')
+      return
     }
-    if (langs.includes('es')) {
-      const esStr = JSON.stringify(aiPreview.es, null, 2)
-      localStorage.setItem('cv_data_es', esStr)
-      if (lang === 'es') { setJson(esStr); onUpdate(aiPreview.es) }
-    }
-    // Save suggestions to localStorage for re-reading (T05)
+
+    const mergedEn = indexes === 'all' ? aiPreview.en : (() => {
+      const clone = JSON.parse(JSON.stringify(currentEn)) as Record<string, unknown>
+      for (const i of toApply) {
+        const fieldPath = aiPreview.explanations[i]?.field
+        if (!fieldPath) continue
+        const newVal = getPath(aiPreview.en as unknown as Record<string, unknown>, fieldPath)
+        if (newVal !== undefined) setPath(clone, fieldPath, newVal)
+      }
+      return clone as unknown as CVData
+    })()
+
+    const mergedEs = indexes === 'all' ? aiPreview.es : (() => {
+      const clone = JSON.parse(JSON.stringify(currentEs)) as Record<string, unknown>
+      for (const i of toApply) {
+        const fieldPath = aiPreview.explanations[i]?.field
+        if (!fieldPath) continue
+        const newVal = getPath(aiPreview.es as unknown as Record<string, unknown>, fieldPath)
+        if (newVal !== undefined) setPath(clone, fieldPath, newVal)
+      }
+      return clone as unknown as CVData
+    })()
+
+    const enStr = JSON.stringify(mergedEn, null, 2)
+    const esStr = JSON.stringify(mergedEs, null, 2)
+    localStorage.setItem('cv_data_en', enStr)
+    localStorage.setItem('cv_data_es', esStr)
+    if (lang === 'en') { setJson(enStr); onUpdate(mergedEn) }
+    if (lang === 'es') { setJson(esStr); onUpdate(mergedEs) }
+
+    // Save to study notes
     const saved = JSON.parse(localStorage.getItem('ai_suggestions') ?? '[]') as SavedSuggestion[]
+    const appliedExplanations = toApply.map((i) => aiPreview.explanations[i]).filter(Boolean)
     const newEntry: SavedSuggestion = {
       id:           Date.now(),
       savedAt:      new Date().toLocaleString(),
-      appliedLangs: langs,
-      explanations: aiPreview.explanations,
+      appliedLangs: ['en', 'es'],
+      explanations: appliedExplanations,
     }
     localStorage.setItem('ai_suggestions', JSON.stringify([newEntry, ...saved].slice(0, 20)))
     setSavedSuggestions([newEntry, ...saved].slice(0, 20))
     setAiPreview(null)
-    setAiStatus(`✓ Applied ${langs.join('+')} — click Revert to undo`)
+    setSelectedChanges(new Set())
+    setAiStatus(`✓ Applied ${toApply.length}/${aiPreview.explanations.length} changes — click Revert to undo`)
   }, [aiPreview, json, lang, onUpdate])
 
   const handleDiscardPreview = useCallback(() => {
@@ -627,10 +683,11 @@ Return only the JSON object described above.`
                       <span className="text-cyber-primary font-mono text-sm font-semibold flex items-center gap-2">
                         <Sparkles size={14} /> Gemini Proposal — Review before applying
                       </span>
-                      <div className="flex items-center gap-2">
-                        <ActionBtn onClick={() => handleApplyPreview(['en'])} icon={<Save size={12} />}>Apply EN</ActionBtn>
-                        <ActionBtn onClick={() => handleApplyPreview(['es'])} icon={<Save size={12} />}>Apply ES</ActionBtn>
-                        <ActionBtn onClick={() => handleApplyPreview(['en','es'])} icon={<Save size={12} />}>Apply Both</ActionBtn>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <ActionBtn onClick={() => handleApplyPreview(selectedChanges)} icon={<Save size={12} />}>
+                          Apply Selected ({selectedChanges.size})
+                        </ActionBtn>
+                        <ActionBtn onClick={() => handleApplyPreview('all')} icon={<CheckCheck size={12} />}>Apply All</ActionBtn>
                         <ActionBtn onClick={handleDiscardPreview} icon={<X size={12} />}>Discard</ActionBtn>
                         <button type="button" onClick={handleDiscardPreview} className="ml-2 text-cyber-muted hover:text-cyber-text transition-colors">
                           <X size={16} />
@@ -702,26 +759,65 @@ Return only the JSON object described above.`
                         </div>
                       </div>
 
-                      {/* Right — explanations */}
+                      {/* Right — explanations with checkboxes */}
                       <div className="w-96 flex-shrink-0 overflow-y-auto p-6 space-y-4">
-                        <p className="text-xs text-cyber-muted uppercase tracking-wider font-semibold">What changed & why — Study this</p>
-                        {aiPreview.explanations.map((ex, i) => (
-                          <div key={i} className="border border-cyber-border rounded-xl p-4 space-y-2">
-                            <p className="text-xs font-mono text-cyber-primary">{ex.field}</p>
-                            <div>
-                              <p className="text-[10px] text-cyber-muted uppercase tracking-wider">What changed</p>
-                              <p className="text-xs text-cyber-text leading-relaxed">{ex.what}</p>
-                            </div>
-                            <div>
-                              <p className="text-[10px] text-cyber-muted uppercase tracking-wider">Why</p>
-                              <p className="text-xs text-cyber-muted leading-relaxed">{ex.why}</p>
-                            </div>
-                            <div className="bg-cyber-primary/10 border border-cyber-primary/20 rounded-lg p-2">
-                              <p className="text-[10px] text-cyber-primary uppercase tracking-wider mb-1">💡 Interview tip</p>
-                              <p className="text-xs text-cyber-text leading-relaxed">{ex.interviewTip}</p>
-                            </div>
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-cyber-muted uppercase tracking-wider font-semibold">
+                            Select changes to apply
+                          </p>
+                          <div className="flex gap-2">
+                            <button type="button"
+                              onClick={() => setSelectedChanges(new Set(aiPreview.explanations.map((_, i) => i)))}
+                              className="text-[10px] text-cyber-primary hover:underline">
+                              All
+                            </button>
+                            <button type="button"
+                              onClick={() => setSelectedChanges(new Set())}
+                              className="text-[10px] text-cyber-muted hover:underline">
+                              None
+                            </button>
                           </div>
-                        ))}
+                        </div>
+                        {aiPreview.explanations.map((ex, i) => {
+                          const checked = selectedChanges.has(i)
+                          return (
+                            <div
+                              key={i}
+                              onClick={() => setSelectedChanges((prev) => {
+                                const next = new Set(prev)
+                                next.has(i) ? next.delete(i) : next.add(i)
+                                return next
+                              })}
+                              className={`border rounded-xl p-4 space-y-2 cursor-pointer transition-colors ${
+                                checked
+                                  ? 'border-cyber-primary/60 bg-cyber-primary/8'
+                                  : 'border-cyber-border opacity-50 hover:opacity-75'
+                              }`}
+                            >
+                              {/* Checkbox + field */}
+                              <div className="flex items-start gap-2">
+                                <div className={`w-4 h-4 rounded flex-shrink-0 mt-0.5 border flex items-center justify-center transition-colors ${
+                                  checked ? 'bg-cyber-primary border-cyber-primary' : 'border-cyber-border'
+                                }`}>
+                                  {checked && <span className="text-cyber-bg text-[10px] font-bold">✓</span>}
+                                </div>
+                                <p className="text-xs font-mono text-cyber-primary">{ex.field}</p>
+                              </div>
+                              <div>
+                                <p className="text-[10px] text-cyber-muted uppercase tracking-wider">What changed</p>
+                                <p className="text-xs text-cyber-text leading-relaxed">{ex.what}</p>
+                              </div>
+                              <div>
+                                <p className="text-[10px] text-cyber-muted uppercase tracking-wider">Why</p>
+                                <p className="text-xs text-cyber-muted leading-relaxed">{ex.why}</p>
+                              </div>
+                              <div className="bg-cyber-primary/10 border border-cyber-primary/20 rounded-lg p-2">
+                                <p className="text-[10px] text-cyber-primary uppercase tracking-wider mb-1">💡 Interview tip</p>
+                                <p className="text-xs text-cyber-text leading-relaxed">{ex.interviewTip}</p>
+                              </div>
+                            </div>
+                          )
+                        })}
                       </div>
 
                     </div>
