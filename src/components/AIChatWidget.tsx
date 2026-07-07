@@ -13,7 +13,6 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Send, ChevronDown, User, Sparkles } from 'lucide-react'
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore'
-import emailjs from '@emailjs/browser'
 import { db } from '../lib/firebase'
 import {
   callGeminiChat,
@@ -27,10 +26,6 @@ import {
 import type { CVData } from '../types/cv'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const SVC  = import.meta.env.VITE_EMAILJS_SERVICE_ID  ?? 'service_eeq90j4'
-const TPL  = import.meta.env.VITE_EMAILJS_TEMPLATE_ID ?? 'template_92l57sh'
-const PKEY = import.meta.env.VITE_EMAILJS_PUBLIC_KEY  ?? 'hwn1qzhXQfhh35cxO'
 
 const QUICK_REPLIES = [
   'What makes Alejandro a strong Tech Lead?',
@@ -128,7 +123,6 @@ export default function AIChatWidget({ cvData, onOpenHireMe, forceOpen, initQues
   const [showContact, setShowContact]   = useState(false)
   const [contact, setContact]           = useState<ContactInfo>({ name: '', company: '', email: '', phone: '' })
   const [contactSubmitted, setContactSubmitted] = useState(false)
-  const [emailSent, setEmailSent]       = useState(false)
 
   const sessionIdRef    = useRef(genSessionId())
   const limitsRef       = useRef<ReturnType<typeof resolveSessionLimits> | null>(null)
@@ -346,36 +340,16 @@ export default function AIChatWidget({ cvData, onOpenHireMe, forceOpen, initQues
     e.preventDefault()
     if (!contact.email.trim()) return
 
-    // Clean markdown from AI responses for plain-text email
-    const cleanText = (t: string) => t.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1').trim()
-
-    const summary = messages
-      .slice(-8)
-      .map((m) => `${m.role === 'user' ? 'You asked' : 'AI replied'}: ${cleanText(m.text)}`)
-      .join('\n\n')
-
-    // Save final to Firestore
+    // Save to Firestore only — no email sent from chat
+    // The HireMeModal that opens next lets the user send a proper email with attachment
     await saveToFirestore(messages, true)
 
-    // Send email via EmailJS
-    try {
-      await emailjs.send(SVC, TPL, {
-        from_name:       contact.name    || 'Anonymous',
-        from_company:    contact.company || '—',
-        reply_to:        contact.email,
-        phone:           contact.phone   || '—',
-        message:         `AI Chat conversation summary:\n\n${summary}`,
-        attachment_name: '(no attachment)',
-        attachment_url:  '',
-      }, PKEY)
-      setEmailSent(true)
-    } catch { /* Firestore save is enough */ }
-
-    // Open HireMeModal pre-filled (client can send a proper email if they want)
+    // Open HireMeModal pre-filled with chat context
     setContactSubmitted(true)
+    const lastUserMsg = messages.filter((m) => m.role === 'user').slice(-1)[0]?.text ?? ''
     onOpenHireMe({
       ...contact,
-      message: messages.filter((m) => m.role === 'user').slice(-1)[0]?.text ?? '',
+      message: lastUserMsg,
     })
   }, [contact, messages, saveToFirestore, onOpenHireMe])
 
@@ -524,7 +498,7 @@ export default function AIChatWidget({ cvData, onOpenHireMe, forceOpen, initQues
               )}
 
               {/* Contact prompt */}
-              {showContact && !emailSent && (
+              {showContact && !contactSubmitted && (
                 <div className="bg-cyber-primary/10 border border-cyber-primary/30 rounded-xl p-3">
                   <p className="text-xs text-cyber-primary font-semibold mb-2">Want to connect with Alejandro directly?</p>
                   {!contactSubmitted ? (

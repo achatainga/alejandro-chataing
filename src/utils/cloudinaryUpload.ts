@@ -32,5 +32,7 @@ export async function uploadToCloudinary(file: File): Promise<string> {
   }
 
   const data = await res.json() as { secure_url: string }
-  return data.secure_url
+  // Add fl_attachment flag so the file downloads directly (bypasses delivery restrictions)
+  const url = data.secure_url.replace('/upload/', '/upload/fl_attachment/')
+  return url
 }
