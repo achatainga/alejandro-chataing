@@ -30,7 +30,7 @@ import type { CVData } from '../types/cv'
 
 const SVC  = import.meta.env.VITE_EMAILJS_SERVICE_ID  ?? 'service_eeq90j4'
 const TPL  = import.meta.env.VITE_EMAILJS_TEMPLATE_ID ?? 'template_92l57sh'
-const PKEY = import.meta.env.VITE_EMAILJS_PUBLIC_KEY  ?? 'hwn1qzhXQfhh35cx0'
+const PKEY = import.meta.env.VITE_EMAILJS_PUBLIC_KEY  ?? 'hwn1qzhXQfhh35cxO'
 
 const QUICK_REPLIES = [
   'What makes Alejandro a strong Tech Lead?',
