@@ -346,29 +346,32 @@ export default function AIChatWidget({ cvData, onOpenHireMe, forceOpen, initQues
     e.preventDefault()
     if (!contact.email.trim()) return
 
+    // Clean markdown from AI responses for plain-text email
+    const cleanText = (t: string) => t.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1').trim()
+
     const summary = messages
       .slice(-8)
-      .map((m) => `${m.role === 'user' ? 'Employer' : 'AI'}: ${m.text}`)
+      .map((m) => `${m.role === 'user' ? 'You asked' : 'AI replied'}: ${cleanText(m.text)}`)
       .join('\n\n')
 
     // Save final to Firestore
     await saveToFirestore(messages, true)
 
-    // Send email via EmailJS (same template)
+    // Send email via EmailJS
     try {
       await emailjs.send(SVC, TPL, {
         from_name:       contact.name    || 'Anonymous',
         from_company:    contact.company || '—',
         reply_to:        contact.email,
         phone:           contact.phone   || '—',
-        message:         `[AI Chat Contact]\n\n${summary}`,
-        attachment_name: '(AI Chat — no attachment)',
-        attachment_url:  '(none)',
+        message:         `AI Chat conversation summary:\n\n${summary}`,
+        attachment_name: '(no attachment)',
+        attachment_url:  '',
       }, PKEY)
       setEmailSent(true)
-    } catch { /* email failed — Firestore save is enough */ }
+    } catch { /* Firestore save is enough */ }
 
-    // Open HireMeModal pre-filled
+    // Open HireMeModal pre-filled (client can send a proper email if they want)
     setContactSubmitted(true)
     onOpenHireMe({
       ...contact,
