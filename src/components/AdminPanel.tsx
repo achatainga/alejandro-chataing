@@ -228,29 +228,40 @@ ${esJson}
 Return only the JSON object described above.`
 
     const model = await getGeminiModel()
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${keyData.key}`
     setAiStatus('Calling Gemini...')
 
-    for (let attempt = 1; attempt <= 5; attempt++) {
-      try {
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-        })
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const result = await res.json()
-        const text: string = result.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
-        const cleaned = text.replace(/```json|```/g, '').trim()
-        const parsed = JSON.parse(cleaned) as { en: CVData; es: CVData; explanations: AiChange[] }
-        setAiPreview(parsed)
-        setAiStatus('Review the proposal below before applying.')
-        break
-      } catch (err) {
-        if (attempt >= 5) { setAiStatus(`Error after 5 attempts: ${err}`) }
-        else { await new Promise((r) => setTimeout(r, 1000 * attempt)); setAiStatus(`Retry ${attempt}/5...`) }
+    // Try each key × each model until one succeeds
+    const FALLBACKS = ['gemini-flash-latest', 'gemini-2.0-flash-lite', 'gemini-1.0-pro']
+    const modelsToTry = [model, ...FALLBACKS.filter((m) => m !== model)]
+    let lastError = ''
+
+    outer: for (const tryModel of modelsToTry) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const kd = await getNextGeminiKey()
+        if (!kd) break outer
+        try {
+          const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${tryModel}:generateContent?key=${kd.key}`,
+            { method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) }
+          )
+          if (res.status === 503) { lastError = '503'; continue }
+          if (!res.ok) { lastError = `HTTP ${res.status}`; continue }
+          const result = await res.json()
+          const text: string = result.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+          const cleaned = text.replace(/```json|```/g, '').trim()
+          const parsed = JSON.parse(cleaned) as { en: CVData; es: CVData; explanations: AiChange[] }
+          setAiPreview(parsed)
+          setAiStatus('Review the proposal below before applying.')
+          setAiLoading(false)
+          return // success
+        } catch (err) {
+          lastError = String(err)
+          await new Promise((r) => setTimeout(r, 800))
+        }
       }
     }
+    setAiStatus(`Error: ${lastError || 'All models unavailable'}`)
     setAiLoading(false)
   }, [jobDesc, json, lang, onUpdate])
 

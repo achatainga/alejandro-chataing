@@ -219,11 +219,11 @@ export async function markKeyFailed(index: number): Promise<void> {
 const MODEL_REF = () => doc(db, 'config', 'gemini_model')
 
 // Fallback chain: if primary model returns 503/overloaded, try these in order
+// All tested against v1beta endpoint — only models confirmed working are listed
 const MODEL_FALLBACK_CHAIN = [
-  'gemini-flash-latest',
-  'gemini-1.5-flash-latest',
-  'gemini-1.5-flash',
-  'gemini-1.0-pro',
+  'gemini-flash-latest',     // primary — alias to latest stable flash
+  'gemini-2.0-flash-lite',   // lighter 2.0 variant, less quota pressure
+  'gemini-1.0-pro',          // older but stable on v1beta
 ]
 
 export async function getGeminiModel(): Promise<string> {
