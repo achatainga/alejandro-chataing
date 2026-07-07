@@ -244,10 +244,12 @@ Return only the JSON object described above.`
         )
 
         if (res.status === 503) {
-          setAiStatus(`⚠ Model "${model}" is overloaded. Select a different model from the dropdown and try again.`)
-          setAiLoading(false)
-          return
+          await markKeyFailed(kd.index)
+          setAiStatus(`Key ${attempt + 1}/4 overloaded (503), trying next key...`)
+          continue
         }
+
+        // After all keys exhausted on 503, tell user to switch model
 
         if (res.status === 429 || res.status === 403) {
           await markKeyFailed(kd.index)
@@ -278,7 +280,7 @@ Return only the JSON object described above.`
         return
       }
     }
-    setAiStatus('All API keys exhausted. Please add new keys or try again later.')
+    setAiStatus(`⚠ All keys returned 503 or failed. Model "${model}" may be globally overloaded — try selecting a different model from the dropdown.`)
     setAiLoading(false)
   }, [jobDesc, json, lang, onUpdate])
 

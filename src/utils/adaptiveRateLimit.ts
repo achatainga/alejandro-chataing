@@ -264,7 +264,8 @@ export async function callGeminiChat(messages: { role: string; text: string }[])
     const errMsg = errData?.error?.message ?? `HTTP ${res.status}`
 
     if (res.status === 503) {
-      // Model overloaded — inform user, don't rotate model
+      // Model overloaded OR per-key rate limit — rotate key, inform user
+      await markKeyFailed(index)
       throw new Error(`Model ${model} is overloaded (503). Please try again in a moment or select a different model in Admin.`)
     }
 
