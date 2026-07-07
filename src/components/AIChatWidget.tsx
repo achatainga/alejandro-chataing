@@ -124,9 +124,10 @@ export default function AIChatWidget({ cvData, onOpenHireMe, forceOpen, initQues
   const [loading, setLoading]     = useState(false)
   const [blocked, setBlocked]     = useState(false)
   const [blockMsg, setBlockMsg]   = useState('')
-  const [showContact, setShowContact] = useState(false)
-  const [contact, setContact]     = useState<ContactInfo>({ name: '', company: '', email: '', phone: '' })
-  const [emailSent, setEmailSent] = useState(false)
+  const [showContact, setShowContact]   = useState(false)
+  const [contact, setContact]           = useState<ContactInfo>({ name: '', company: '', email: '', phone: '' })
+  const [contactSubmitted, setContactSubmitted] = useState(false)
+  const [emailSent, setEmailSent]       = useState(false)
 
   const sessionIdRef    = useRef(genSessionId())
   const limitsRef       = useRef<ReturnType<typeof resolveSessionLimits> | null>(null)
@@ -293,6 +294,7 @@ export default function AIChatWidget({ cvData, onOpenHireMe, forceOpen, initQues
     } catch { /* email failed — Firestore save is enough */ }
 
     // Open HireMeModal pre-filled
+    setContactSubmitted(true)
     onOpenHireMe({
       ...contact,
       message: messages.filter((m) => m.role === 'user').slice(-1)[0]?.text ?? '',
@@ -447,7 +449,7 @@ export default function AIChatWidget({ cvData, onOpenHireMe, forceOpen, initQues
               {showContact && !emailSent && (
                 <div className="bg-cyber-primary/10 border border-cyber-primary/30 rounded-xl p-3">
                   <p className="text-xs text-cyber-primary font-semibold mb-2">Want to connect with Alejandro directly?</p>
-                  {!contact.email ? (
+                  {!contactSubmitted ? (
                     <form onSubmit={handleContactSubmit} className="space-y-2">
                       {(['name','company','email','phone'] as const).map((f) => (
                         <input key={f} type={f === 'email' ? 'email' : 'text'}
