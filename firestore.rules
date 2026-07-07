@@ -1,10 +1,17 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
     // notifications: write-only from client, read only via Admin SDK
-    match /notifications/{type}/items/{doc} {
+    match /notifications/{type}/items/{docId} {
       allow create: if true;
       allow read, update, delete: if false;
+    }
+
+    // config/traffic_state: read+write from client (rate limit tracking)
+    // config/gemini_rotation: read+write from client (key rotation)
+    match /config/{configId} {
+      allow read, write: if configId in ['traffic_state', 'gemini_rotation'];
     }
   }
 }
