@@ -113,6 +113,13 @@ export default function AdminPanel({ open, onClose, data, onUpdate, lang }: Prop
     if (open && tab === 'notifications') fetchNotifications()
   }, [open, tab, fetchNotifications])
 
+  // Auto-refresh every 30s while panel is open on notifications tab
+  useEffect(() => {
+    if (!open || tab !== 'notifications') return
+    const interval = setInterval(fetchNotifications, 30_000)
+    return () => clearInterval(interval)
+  }, [open, tab, fetchNotifications])
+
   const markRead = useCallback(async (n: Notification) => {
     if (n.read) return
     const type = n.source === 'email_form' ? 'hire_me' : n.source === 'whatsapp_button' ? 'whatsapp' : 'ai_chat'

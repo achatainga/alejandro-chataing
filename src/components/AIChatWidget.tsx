@@ -152,20 +152,32 @@ export default function AIChatWidget({ cvData, onOpenHireMe, forceOpen, initQues
       userAgent: navigator.userAgent.slice(0, 120),
     }
     visitorRef.current = info
-    // Enrich with IP geolocation (fire-and-forget, free, no key)
-    fetch('https://ip-api.com/json?fields=country,regionName,city,isp,query')
-      .then((r) => r.json())
-      .then((d) => {
-        visitorRef.current = {
-          ...visitorRef.current,
-          ip:      d.query   ?? '',
-          city:    d.city    ?? '',
-          region:  d.regionName ?? '',
-          country: d.country ?? '',
-          isp:     d.isp     ?? '',
-        }
-      })
-      .catch(() => {})
+    // Enrich with IP geolocation (fire-and-forget)
+    // Try multiple providers in case one is blocked by ad blockers
+    const geoProviders = [
+      'https://ipwho.is/',
+      'https://ipapi.co/json/',
+    ]
+    const tryGeo = async () => {
+      for (const url of geoProviders) {
+        try {
+          const r = await fetch(url)
+          if (!r.ok) continue
+          const d = await r.json()
+          // Normalize across providers
+          visitorRef.current = {
+            ...visitorRef.current,
+            ip:      d.ip       ?? d.query ?? '',
+            city:    d.city     ?? '',
+            region:  d.region   ?? d.regionName ?? '',
+            country: d.country  ?? d.country_name ?? '',
+            isp:     d.org      ?? d.isp ?? d.connection?.isp ?? '',
+          }
+          return // success
+        } catch { /* try next */ }
+      }
+    }
+    tryGeo()
   }, [open])
 
   // ─── Init session on open ──────────────────────────────────────────────────
