@@ -7,7 +7,7 @@ import type { Translations } from '../i18n/translations'
 
 type Tab = 'terminal' | 'ast'
 
-export default function ShowcaseSection({ tr, onAskAI }: { tr: Translations; onAskAI?: () => void }) {
+export default function ShowcaseSection({ tr, onAskAI }: { tr: Translations; onAskAI?: (question?: string) => void }) {
   const [active, setActive] = useState<Tab>('terminal')
 
   const TABS: { id: Tab; label: string; icon: React.ReactNode; desc: string }[] = [

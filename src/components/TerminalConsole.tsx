@@ -97,16 +97,16 @@ const COMMANDS: Record<string, () => Line[]> = {
   ],
 }
 
-export default function TerminalConsole({ embedded = false, tr, onAskAI }: { embedded?: boolean; tr?: Translations; onAskAI?: () => void }) {
+export default function TerminalConsole({ embedded = false, tr, onAskAI }: { embedded?: boolean; tr?: Translations; onAskAI?: (question?: string) => void }) {
   const typeHelp   = tr?.typeHelp   ?? 'Type "help" to see available commands.'
   const cmdNotFound = tr?.cmdNotFound ?? 'command not found'
 
   const banner: Line[] = [
-    { type: 'info',   text: '\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557' },
-    { type: 'info',   text: '\u2551  Alejandro Chataing -- AI-Augmented Tech Lead v3.7.1  \u2551' },
-    { type: 'info',   text: '\u2551  Node: caracas-ve-01 | MCP: mcp-code-context           \u2551' },
-    { type: 'info',   text: '\u2551  Kiro IDE | Amazon Q | Gemini | Antigravity IDE        \u2551' },
-    { type: 'info',   text: '\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d' },
+    { type: 'info',   text: '┌─────────────────────────────────────────────────────┐' },
+    { type: 'info',   text: '│  Alejandro Chataing -- AI-Augmented Tech Lead v3.7.1 │' },
+    { type: 'info',   text: '│  Node: caracas-ve-01 | MCP: mcp-code-context          │' },
+    { type: 'info',   text: '│  Kiro IDE | Amazon Q | Gemini | Antigravity IDE       │' },
+    { type: 'info',   text: '└─────────────────────────────────────────────────────┘' },
     { type: 'output', text: typeHelp },
   ]
 
@@ -131,11 +131,12 @@ export default function TerminalConsole({ embedded = false, tr, onAskAI }: { emb
 
     if (trimmed === 'clear') { setLines(banner); return }
 
-    if (trimmed === 'ask' || trimmed === 'chat') {
-      setLines((prev) => [...prev, echo, { type: 'success', text: '> Opening AI chat assistant...' }])
+    if (trimmed === 'ask' || trimmed === 'chat' || trimmed.startsWith('ask ') || trimmed.startsWith('chat ')) {
+      const question = cmd.trim().replace(/^(ask|chat)\s*/i, '').trim()
+      setLines((prev) => [...prev, echo, { type: 'success', text: question ? `> Opening AI chat: "${question}"` : '> Opening AI chat assistant...' }])
       setHistory((prev) => [cmd, ...prev].slice(0, 50))
       setHistIdx(-1)
-      setTimeout(() => onAskAI?.(), 300)
+      setTimeout(() => onAskAI?.(question || undefined), 300)
       return
     }
 

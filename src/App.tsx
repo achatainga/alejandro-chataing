@@ -45,6 +45,7 @@ export default function App() {
   const [hireMeOpen, setHireMeOpen] = useState(false)
   const [hireMePrefill, setHireMePrefill] = useState<{ name: string; company: string; email: string; phone: string; message: string } | undefined>()
   const [chatForceOpen, setChatForceOpen] = useState(0)
+  const [chatInitQuestion, setChatInitQuestion] = useState<string | undefined>()
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
 
   const logoClicksRef = useRef(0)
@@ -104,7 +105,7 @@ export default function App() {
         <ExperienceTimeline experience={cvData.experience} tr={tr} />
         <ProjectsGrid projects={cvData.projects} tr={tr} />
         <SkillsRadar skillGroups={cvData.skillGroups} tr={tr} />
-        <ShowcaseSection tr={tr} onAskAI={() => setChatForceOpen((n) => n + 1)} />
+        <ShowcaseSection tr={tr} onAskAI={(q) => { setChatInitQuestion(q); setChatForceOpen((n) => n + 1) }} />
         <GitHubSection tr={tr} />
         <EducationSection data={cvData} tr={tr} />
         <Footer data={cvData} tr={tr} onHireMe={() => setHireMeOpen(true)} />
@@ -121,6 +122,7 @@ export default function App() {
         cvData={cvData}
         onOpenHireMe={(prefill) => { setHireMePrefill(prefill); setHireMeOpen(true) }}
         forceOpen={chatForceOpen}
+        initQuestion={chatInitQuestion}
       />
       <div className="print-cv-root">
         <PrintCV data={cvData} />
