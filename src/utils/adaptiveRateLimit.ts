@@ -214,17 +214,24 @@ export async function markKeyFailed(index: number): Promise<void> {
   } catch { /* non-critical */ }
 }
 
-// ─── Gemini Model (stored in Firestore, fallback to gemini-flash-latest) ────
+// ─── Gemini Model (stored in Firestore, fallback chain) ────
 
 const MODEL_REF = () => doc(db, 'config', 'gemini_model')
-const FALLBACK_MODEL = 'gemini-flash-latest'
+
+// Fallback chain: if primary model returns 503/overloaded, try these in order
+const MODEL_FALLBACK_CHAIN = [
+  'gemini-flash-latest',
+  'gemini-1.5-flash-latest',
+  'gemini-1.5-flash',
+  'gemini-1.0-pro',
+]
 
 export async function getGeminiModel(): Promise<string> {
   try {
     const snap = await getDoc(MODEL_REF())
-    if (snap.exists()) return (snap.data() as { model: string }).model ?? FALLBACK_MODEL
+    if (snap.exists()) return (snap.data() as { model: string }).model ?? MODEL_FALLBACK_CHAIN[0]
   } catch { /* use fallback */ }
-  return FALLBACK_MODEL
+  return MODEL_FALLBACK_CHAIN[0]
 }
 
 export async function saveGeminiModel(model: string): Promise<void> {
@@ -239,38 +246,48 @@ export async function callGeminiChat(messages: { role: string; text: string }[])
   const keyData = await getNextGeminiKey()
   if (!keyData) throw new Error('No Gemini keys configured')
 
-  const model = await getGeminiModel()
+  const primaryModel = await getGeminiModel()
   const { key, index } = keyData
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`
 
   const contents = messages.map((m) => ({
     role: m.role === 'user' ? 'user' : 'model',
     parts: [{ text: m.text }],
   }))
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents }),
-  })
+  // Build model list: primary first, then fallbacks (deduplicated)
+  const modelsToTry = [primaryModel, ...MODEL_FALLBACK_CHAIN.filter((m) => m !== primaryModel)]
 
-  if (!res.ok) {
-    await markKeyFailed(index)
-    // Retry with next key
-    const next = await getNextGeminiKey()
-    if (!next || next.index === index) throw new Error(`Gemini error: HTTP ${res.status}`)
+  for (const model of modelsToTry) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents }),
+    })
 
-    const res2 = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${next.key}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents }) }
-    )
-    if (!res2.ok) { await markKeyFailed(next.index); throw new Error(`Gemini error: HTTP ${res2.status}`) }
-    await markKeySuccess(next.index)
-    const data2 = await res2.json()
-    return data2.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+    // 503 = model overloaded → try next model in chain
+    if (res.status === 503) continue
+
+    if (!res.ok) {
+      // Non-503 error → mark key failed, try next key
+      await markKeyFailed(index)
+      const next = await getNextGeminiKey()
+      if (!next || next.index === index) throw new Error(`Gemini error: HTTP ${res.status}`)
+
+      const res2 = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${next.key}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents }) }
+      )
+      if (!res2.ok) { await markKeyFailed(next.index); throw new Error(`Gemini error: HTTP ${res2.status}`) }
+      await markKeySuccess(next.index)
+      const data2 = await res2.json()
+      return data2.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+    }
+
+    await markKeySuccess(index)
+    const data = await res.json()
+    return data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
   }
 
-  await markKeySuccess(index)
-  const data = await res.json()
-  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+  throw new Error('All Gemini models are currently unavailable (503). Please try again in a moment.')
 }
