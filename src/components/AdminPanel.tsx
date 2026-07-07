@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { X, Save, Download, Upload, Sparkles, Key, FileJson, Bell, MessageSquare, Mail, RefreshCw, CheckCheck, RotateCcw } from 'lucide-react'
 import { collection, query, orderBy, limit, getDocs, doc, updateDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import { saveGeminiModel, getGeminiModel } from '../utils/adaptiveRateLimit'
+import { saveGeminiModel, getGeminiModel, getNextGeminiKey } from '../utils/adaptiveRateLimit'
 import type { CVData } from '../types/cv'
 import type { Lang } from '../i18n/translations'
 
@@ -58,7 +58,6 @@ export default function AdminPanel({ open, onClose, data, onUpdate, lang }: Prop
   const [jsonError, setJsonError] = useState('')
 
   // --- AI state ---
-  const [geminiKey, setGeminiKey]     = useState(() => sessionStorage.getItem('gemini_key') ?? '')
   const [geminiModel, setGeminiModel] = useState(() => localStorage.getItem('gemini_model') ?? 'gemini-flash-latest')
   const [modelList, setModelList]     = useState<string[]>([])
   const [modelsLoading, setModelsLoading] = useState(false)
@@ -70,6 +69,7 @@ export default function AdminPanel({ open, onClose, data, onUpdate, lang }: Prop
       localStorage.setItem('gemini_model', m)
     }).catch(() => {})
   }, [])
+
   const [jobDesc, setJobDesc]         = useState('')
   const [aiLoading, setAiLoading]     = useState(false)
   const [aiStatus, setAiStatus]       = useState('')
@@ -145,19 +145,15 @@ export default function AdminPanel({ open, onClose, data, onUpdate, lang }: Prop
   }, [])
 
   // --- AI Tailoring ---
-  const handleSaveKey = useCallback(() => {
-    sessionStorage.setItem('gemini_key', geminiKey)
-    setAiStatus('API key saved to session')
-  }, [geminiKey])
-
   const fetchModels = useCallback(async () => {
-    if (!geminiKey) { setAiStatus('Save API key first'); return }
     setModelsLoading(true)
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`)
+      const keyData = await getNextGeminiKey()
+      if (!keyData) { setAiStatus('No Gemini keys configured in VITE_GEMINI_KEYS'); setModelsLoading(false); return }
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${keyData.key}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json() as { models: { name: string; supportedGenerationMethods: string[] }[] }
-      const names = data.models
+      const result = await res.json() as { models: { name: string; supportedGenerationMethods: string[] }[] }
+      const names = result.models
         .filter((m) => m.supportedGenerationMethods.includes('generateContent'))
         .map((m) => m.name.replace('models/', ''))
       setModelList(names)
@@ -165,13 +161,19 @@ export default function AdminPanel({ open, onClose, data, onUpdate, lang }: Prop
       setAiStatus(`Failed to fetch models: ${e}`)
     }
     setModelsLoading(false)
-  }, [geminiKey])
+  }, [])
 
   const handleAITailor = useCallback(async () => {
-    if (!geminiKey || !jobDesc.trim()) {
-      setAiStatus('Add Gemini API key and paste job description first'); return
+    if (!jobDesc.trim()) {
+      setAiStatus('Paste a job description first'); return
     }
-    setAiLoading(true); setAiStatus('Calling Gemini...')
+    setAiLoading(true); setAiStatus('Getting Gemini key...')
+
+    const keyData = await getNextGeminiKey()
+    if (!keyData) {
+      setAiStatus('No Gemini keys configured in VITE_GEMINI_KEYS')
+      setAiLoading(false); return
+    }
 
     const enJson = localStorage.getItem('cv_data_en') ?? json
     const esJson = localStorage.getItem('cv_data_es') ?? json
@@ -211,7 +213,8 @@ ${esJson}
 Return only the JSON object described above.`
 
     const model = await getGeminiModel()
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${keyData.key}`
+    setAiStatus('Calling Gemini...')
 
     for (let attempt = 1; attempt <= 5; attempt++) {
       try {
@@ -234,7 +237,7 @@ Return only the JSON object described above.`
       }
     }
     setAiLoading(false)
-  }, [geminiKey, jobDesc, json, geminiModel])
+  }, [jobDesc, json, lang, onUpdate])
 
   const handleApplyPreview = useCallback((langs: ('en' | 'es')[]) => {
     if (!aiPreview) return
@@ -423,15 +426,14 @@ Return only the JSON object described above.`
               {/* AI TAILORING TAB */}
               {tab === 'ai' && (
                 <div className="space-y-5">
-                  <Section icon={<Key size={14} />} title="Gemini API Key (session only)">
-                    <div className="flex gap-2">
-                      <input type="password" value={geminiKey} onChange={(e) => setGeminiKey(e.target.value)}
-                        placeholder="AIza..."
-                        className="flex-1 bg-cyber-bg border border-cyber-border rounded-lg px-3 py-2 text-xs font-mono text-cyber-text outline-none focus:border-cyber-primary/50 transition-colors"
-                      />
-                      <ActionBtn onClick={handleSaveKey} icon={<Save size={12} />}>Save</ActionBtn>
-                    </div>
-                    <p className="text-cyber-muted text-xs mt-1">Stored in sessionStorage only — never sent anywhere except Gemini.</p>
+                  <Section icon={<Key size={14} />} title="Gemini Keys (rotation)">
+                    <p className="text-cyber-muted text-xs">
+                      Keys are loaded from <code className="text-cyber-primary">VITE_GEMINI_KEYS</code> env var and rotated automatically.
+                      No manual key needed.
+                    </p>
+                    <ActionBtn onClick={fetchModels} disabled={modelsLoading} icon={<RefreshCw size={12} className={modelsLoading ? 'animate-spin' : ''} />}>
+                      {modelsLoading ? 'Loading...' : 'Test keys & fetch models'}
+                    </ActionBtn>
                   </Section>
 
                   <Section icon={<Sparkles size={14} />} title="Model">
@@ -453,9 +455,6 @@ Return only the JSON object described above.`
                           <option key={m} value={m}>{m}</option>
                         ))}
                       </select>
-                      <ActionBtn onClick={fetchModels} disabled={modelsLoading} icon={<RefreshCw size={12} className={modelsLoading ? 'animate-spin' : ''} />}>
-                        {modelsLoading ? 'Loading...' : 'Fetch'}
-                      </ActionBtn>
                     </div>
                   </Section>
 

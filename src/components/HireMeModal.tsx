@@ -108,7 +108,8 @@ export default function HireMeModal({ open, onClose, tr, prefill }: Props) {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 no-print"
-          onClick={(e) => e.target === e.currentTarget && handleClose()}
+          onMouseDown={(e) => e.target === e.currentTarget && handleClose()}
+          onKeyDown={(e) => e.key === 'Escape' && handleClose()}
         >
           <motion.div
             initial={{ scale: 0.92, opacity: 0, y: 20 }}
