@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Save, Download, Upload, Sparkles, Key, FileJson, Bell, MessageSquare, Mail, RefreshCw, CheckCheck } from 'lucide-react'
+import { X, Save, Download, Upload, Sparkles, Key, FileJson, Bell, MessageSquare, Mail, RefreshCw, CheckCheck, RotateCcw } from 'lucide-react'
 import { collection, query, orderBy, limit, getDocs, doc, updateDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import type { CVData } from '../types/cv'
@@ -43,10 +43,12 @@ export default function AdminPanel({ open, onClose, data, onUpdate, lang }: Prop
   const [jsonError, setJsonError] = useState('')
 
   // --- AI state ---
-  const [geminiKey, setGeminiKey] = useState(() => sessionStorage.getItem('gemini_key') ?? '')
-  const [jobDesc, setJobDesc]     = useState('')
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiStatus, setAiStatus]   = useState('')
+  const [geminiKey, setGeminiKey]   = useState(() => sessionStorage.getItem('gemini_key') ?? '')
+  const [jobDesc, setJobDesc]       = useState('')
+  const [aiLoading, setAiLoading]   = useState(false)
+  const [aiStatus, setAiStatus]     = useState('')
+  const [aiPreview, setAiPreview]   = useState<string | null>(null)
+  const [prevJson, setPrevJson]     = useState<string | null>(null)
 
   const fetchNotifications = useCallback(async () => {
     setNLoading(true); setNError('')
@@ -151,8 +153,8 @@ Return only the optimized JSON, no markdown, no explanation.`
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const result = await res.json()
         const text: string = result.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
-        setJson(text.replace(/```json|```/g, '').trim())
-        setAiStatus('✓ CV optimized by Gemini AI')
+        setAiPreview(text.replace(/```json|```/g, '').trim())
+        setAiStatus('Review the proposal below before applying.')
         break
       } catch (err) {
         if (attempt >= 5) { setAiStatus(`Error after 5 attempts: ${err}`) }
@@ -161,6 +163,26 @@ Return only the optimized JSON, no markdown, no explanation.`
     }
     setAiLoading(false)
   }, [geminiKey, jobDesc, json])
+
+  const handleApplyPreview = useCallback(() => {
+    if (!aiPreview) return
+    setPrevJson(json)
+    setJson(aiPreview)
+    setAiPreview(null)
+    setAiStatus('✓ Applied — click Revert to undo')
+  }, [aiPreview, json])
+
+  const handleDiscardPreview = useCallback(() => {
+    setAiPreview(null)
+    setAiStatus('Discarded.')
+  }, [])
+
+  const handleRevert = useCallback(() => {
+    if (!prevJson) return
+    setJson(prevJson)
+    setPrevJson(null)
+    setAiStatus('Reverted to previous JSON.')
+  }, [prevJson])
 
   const unread = notifications.filter((n) => !n.read).length
 
@@ -330,11 +352,50 @@ Return only the optimized JSON, no markdown, no explanation.`
                       <ActionBtn onClick={handleAITailor} disabled={aiLoading} icon={<Sparkles size={12} />}>
                         {aiLoading ? 'Optimizing...' : 'Adapt CV with AI'}
                       </ActionBtn>
+                      {prevJson && (
+                        <ActionBtn onClick={handleRevert} icon={<RotateCcw size={12} />}>
+                          Revert
+                        </ActionBtn>
+                      )}
                       {aiStatus && <span className="text-xs text-cyber-muted">{aiStatus}</span>}
                     </div>
                   </Section>
                 </div>
               )}
+
+              {/* AI PREVIEW MODAL */}
+              <AnimatePresence>
+                {aiPreview && (
+                  <motion.div
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+                  >
+                    <motion.div
+                      initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0.95, opacity: 0 }} transition={{ duration: 0.15 }}
+                      className="bg-cyber-surface border border-cyber-primary/40 rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden"
+                    >
+                      <div className="flex items-center justify-between px-5 py-4 border-b border-cyber-border">
+                        <span className="text-cyber-primary font-mono text-sm font-semibold flex items-center gap-2">
+                          <Sparkles size={14} /> Gemini Proposal — Review before applying
+                        </span>
+                        <button type="button" onClick={handleDiscardPreview} className="text-cyber-muted hover:text-cyber-text transition-colors">
+                          <X size={16} />
+                        </button>
+                      </div>
+                      <textarea
+                        readOnly
+                        value={aiPreview}
+                        className="flex-1 bg-cyber-bg p-4 text-xs font-mono text-cyber-text outline-none resize-none overflow-y-auto"
+                      />
+                      <div className="flex gap-2 p-4 border-t border-cyber-border">
+                        <ActionBtn onClick={handleApplyPreview} icon={<Save size={12} />}>Apply</ActionBtn>
+                        <ActionBtn onClick={handleDiscardPreview} icon={<X size={12} />}>Discard</ActionBtn>
+                      </div>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
             </div>
           </motion.div>
