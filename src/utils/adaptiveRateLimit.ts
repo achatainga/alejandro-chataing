@@ -214,16 +214,34 @@ export async function markKeyFailed(index: number): Promise<void> {
   } catch { /* non-critical */ }
 }
 
-// ─── Gemini Chat Call (with rotation) ────────────────────────────────────────
+// ─── Gemini Model (stored in Firestore, fallback to gemini-flash-latest) ────
 
-const MODEL = import.meta.env.VITE_CHAT_GEMINI_MODEL ?? 'gemini-2.0-flash-latest'
+const MODEL_REF = () => doc(db, 'config', 'gemini_model')
+const FALLBACK_MODEL = 'gemini-flash-latest'
+
+export async function getGeminiModel(): Promise<string> {
+  try {
+    const snap = await getDoc(MODEL_REF())
+    if (snap.exists()) return (snap.data() as { model: string }).model ?? FALLBACK_MODEL
+  } catch { /* use fallback */ }
+  return FALLBACK_MODEL
+}
+
+export async function saveGeminiModel(model: string): Promise<void> {
+  try {
+    await setDoc(MODEL_REF(), { model }, { merge: true })
+  } catch { /* non-critical */ }
+}
+
+// ─── Gemini Chat Call (with rotation) ────────────────────────────────────────
 
 export async function callGeminiChat(messages: { role: string; text: string }[]): Promise<string> {
   const keyData = await getNextGeminiKey()
   if (!keyData) throw new Error('No Gemini keys configured')
 
+  const model = await getGeminiModel()
   const { key, index } = keyData
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`
 
   const contents = messages.map((m) => ({
     role: m.role === 'user' ? 'user' : 'model',
@@ -243,7 +261,7 @@ export async function callGeminiChat(messages: { role: string; text: string }[])
     if (!next || next.index === index) throw new Error(`Gemini error: HTTP ${res.status}`)
 
     const res2 = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${next.key}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${next.key}`,
       { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents }) }
     )
     if (!res2.ok) { await markKeyFailed(next.index); throw new Error(`Gemini error: HTTP ${res2.status}`) }

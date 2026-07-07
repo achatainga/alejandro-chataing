@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { X, Save, Download, Upload, Sparkles, Key, FileJson, Bell, MessageSquare, Mail, RefreshCw, CheckCheck, RotateCcw } from 'lucide-react'
 import { collection, query, orderBy, limit, getDocs, doc, updateDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
+import { saveGeminiModel, getGeminiModel } from '../utils/adaptiveRateLimit'
 import type { CVData } from '../types/cv'
 import type { Lang } from '../i18n/translations'
 
@@ -58,9 +59,17 @@ export default function AdminPanel({ open, onClose, data, onUpdate, lang }: Prop
 
   // --- AI state ---
   const [geminiKey, setGeminiKey]     = useState(() => sessionStorage.getItem('gemini_key') ?? '')
-  const [geminiModel, setGeminiModel] = useState(() => localStorage.getItem('gemini_model') ?? 'gemini-2.0-flash-latest')
+  const [geminiModel, setGeminiModel] = useState(() => localStorage.getItem('gemini_model') ?? 'gemini-flash-latest')
   const [modelList, setModelList]     = useState<string[]>([])
   const [modelsLoading, setModelsLoading] = useState(false)
+
+  // Load model from Firestore on mount
+  useEffect(() => {
+    getGeminiModel().then((m) => {
+      setGeminiModel(m)
+      localStorage.setItem('gemini_model', m)
+    }).catch(() => {})
+  }, [])
   const [jobDesc, setJobDesc]         = useState('')
   const [aiLoading, setAiLoading]     = useState(false)
   const [aiStatus, setAiStatus]       = useState('')
@@ -201,7 +210,8 @@ ${esJson}
 
 Return only the JSON object described above.`
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`
+    const model = await getGeminiModel()
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`
 
     for (let attempt = 1; attempt <= 5; attempt++) {
       try {
@@ -428,7 +438,12 @@ Return only the JSON object described above.`
                     <div className="flex gap-2">
                       <select
                         value={geminiModel}
-                        onChange={(e) => { setGeminiModel(e.target.value); localStorage.setItem('gemini_model', e.target.value) }}
+                        onChange={(e) => {
+                          const m = e.target.value
+                          setGeminiModel(m)
+                          localStorage.setItem('gemini_model', m)
+                          saveGeminiModel(m).catch(() => {})
+                        }}
                         className="flex-1 bg-cyber-bg border border-cyber-border rounded-lg px-3 py-2 text-xs font-mono text-cyber-text outline-none focus:border-cyber-primary/50 transition-colors"
                       >
                         {modelList.length === 0 && (

@@ -10,6 +10,12 @@ const firebaseConfig = {
   appId:             import.meta.env.VITE_FIREBASE_APP_ID             ?? '1:964337073099:web:70476903598c5dd580544e',
 }
 
+console.log('[Firebase] config:', {
+  projectId: firebaseConfig.projectId,
+  appId:     firebaseConfig.appId,
+  fromEnv:   !!import.meta.env.VITE_FIREBASE_PROJECT_ID,
+})
+
 const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig)
 
 export const db = getFirestore(app)
