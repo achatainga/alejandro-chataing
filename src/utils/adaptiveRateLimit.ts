@@ -243,11 +243,7 @@ export async function saveGeminiModel(model: string): Promise<void> {
 // ─── Gemini Chat Call (with rotation) ────────────────────────────────────────
 
 export async function callGeminiChat(messages: { role: string; text: string }[]): Promise<string> {
-  const keyData = await getNextGeminiKey()
-  if (!keyData) throw new Error('No Gemini keys configured')
-
   const primaryModel = await getGeminiModel()
-  const { key, index } = keyData
 
   const contents = messages.map((m) => ({
     role: m.role === 'user' ? 'user' : 'model',
@@ -258,36 +254,38 @@ export async function callGeminiChat(messages: { role: string; text: string }[])
   const modelsToTry = [primaryModel, ...MODEL_FALLBACK_CHAIN.filter((m) => m !== primaryModel)]
 
   for (const model of modelsToTry) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents }),
-    })
+    // Try every available key for this model before moving to next model
+    for (let attempt = 0; attempt < KEYS.length; attempt++) {
+      const keyData = await getNextGeminiKey()
+      if (!keyData) throw new Error('No Gemini keys configured')
 
-    // 503 = model overloaded → try next model in chain
-    if (res.status === 503) continue
+      const { key, index } = keyData
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`
 
-    if (!res.ok) {
-      // Non-503 error → mark key failed, try next key
-      await markKeyFailed(index)
-      const next = await getNextGeminiKey()
-      if (!next || next.index === index) throw new Error(`Gemini error: HTTP ${res.status}`)
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents }),
+      })
 
-      const res2 = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${next.key}`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents }) }
-      )
-      if (!res2.ok) { await markKeyFailed(next.index); throw new Error(`Gemini error: HTTP ${res2.status}`) }
-      await markKeySuccess(next.index)
-      const data2 = await res2.json()
-      return data2.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+      if (res.status === 503) {
+        // Model overloaded — try next key, if all keys fail this model, try next model
+        continue
+      }
+
+      if (!res.ok) {
+        // Auth/quota error on this key — mark failed, try next key
+        await markKeyFailed(index)
+        continue
+      }
+
+      // Success
+      await markKeySuccess(index)
+      const data = await res.json()
+      return data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
     }
-
-    await markKeySuccess(index)
-    const data = await res.json()
-    return data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+    // All keys failed for this model → try next model in chain
   }
 
-  throw new Error('All Gemini models are currently unavailable (503). Please try again in a moment.')
+  throw new Error('All Gemini models are currently unavailable. Please try again in a moment.')
 }
