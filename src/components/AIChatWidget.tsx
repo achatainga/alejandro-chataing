@@ -12,7 +12,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Send, ChevronDown, User, Sparkles } from 'lucide-react'
-import { addDoc, collection, doc, setDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore'
 import emailjs from '@emailjs/browser'
 import { db } from '../lib/firebase'
 import {
@@ -292,10 +292,12 @@ export default function AIChatWidget({ cvData, onOpenHireMe, forceOpen, initQues
         const summary = final
           .map((m) => `${m.role === 'user' ? 'Employer' : 'AI'}: ${m.text.slice(0, 150)}`)
           .join('\n')
-        // Small delay so IP geolocation has time to resolve
+        const sid = sessionIdRef.current
+        // Delay 2s so IP geolocation resolves before writing
         setTimeout(() => {
-          addDoc(collection(db, 'notifications', 'ai_chat', 'items'), {
-            sessionId:     sessionIdRef.current,
+          const payload = {
+            sessionId:     sid,
+            source:        'ai_chat',
             firstQuestion: firstQ,
             summary,
             messageCount:  final.length,
@@ -303,8 +305,12 @@ export default function AIChatWidget({ cvData, onOpenHireMe, forceOpen, initQues
             contact:       null,
             read:          false,
             createdAt:     serverTimestamp(),
-          }).catch(() => {})
-        }, 1500)
+          }
+          console.log('[AIChatWidget] writing notification', sid, payload)
+          setDoc(doc(db, 'notifications', 'ai_chat', 'items', sid), payload)
+            .then(() => console.log('[AIChatWidget] notification saved ✓'))
+            .catch((e) => console.error('[AIChatWidget] notification FAILED', e))
+        }, 2000)
       }
 
       // Show contact prompt after 4+ exchanges

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, MessageSquare, Paperclip, Send, CheckCircle, AlertCircle } from 'lucide-react'
 import emailjs from '@emailjs/browser'
@@ -29,6 +29,17 @@ export default function HireMeModal({ open, onClose, tr, prefill }: Props) {
   const [status,     setStatus]     = useState<Status>('idle')
   const [errMsg,     setErrMsg]     = useState('')
   const [attachWarn, setAttachWarn] = useState('')
+
+  // Sync prefill whenever modal opens with new data
+  useEffect(() => {
+    if (open && prefill) {
+      if (prefill.name)    setName(prefill.name)
+      if (prefill.company) setCompany(prefill.company)
+      if (prefill.email)   setEmail(prefill.email)
+      if (prefill.phone)   setPhone(prefill.phone)
+      if (prefill.message) setMessage(prefill.message)
+    }
+  }, [open, prefill])
 
   const clearFile = useCallback(() => {
     setFileName(''); setFileObj(null)
