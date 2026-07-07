@@ -312,10 +312,8 @@ export default function AIChatWidget({ cvData, onOpenHireMe, forceOpen, initQues
             read:          false,
             createdAt:     serverTimestamp(),
           }
-          console.log('[AIChatWidget] writing notification', sid, payload)
           setDoc(doc(db, 'notifications', 'ai_chat', 'items', sid), payload)
-            .then(() => console.log('[AIChatWidget] notification saved ✓'))
-            .catch((e) => console.error('[AIChatWidget] notification FAILED', e))
+            .catch(() => {})
         }, 2000)
       }
 
