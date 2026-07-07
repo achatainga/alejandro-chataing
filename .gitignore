@@ -27,3 +27,6 @@ dist-ssr
 .env
 .env.local
 .env.production
+
+# Internal planning docs — not for production
+SSR-MIGRATION-PLAN.md
