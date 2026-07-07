@@ -16,6 +16,13 @@ interface Props {
 
 type Tab = 'notifications' | 'cv' | 'ai'
 
+interface AiChange {
+  field: string
+  what: string
+  why: string
+  interviewTip: string
+}
+
 interface Notification {
   id: string
   source: 'email_form' | 'whatsapp_button'
@@ -43,15 +50,15 @@ export default function AdminPanel({ open, onClose, data, onUpdate, lang }: Prop
   const [jsonError, setJsonError] = useState('')
 
   // --- AI state ---
-  const [geminiKey, setGeminiKey]   = useState(() => sessionStorage.getItem('gemini_key') ?? '')
-  const [geminiModel, setGeminiModel] = useState(() => sessionStorage.getItem('gemini_model') ?? 'gemini-2.0-flash-latest')
-  const [modelList, setModelList]   = useState<string[]>([])
+  const [geminiKey, setGeminiKey]     = useState(() => sessionStorage.getItem('gemini_key') ?? '')
+  const [geminiModel, setGeminiModel] = useState(() => localStorage.getItem('gemini_model') ?? 'gemini-2.0-flash-latest')
+  const [modelList, setModelList]     = useState<string[]>([])
   const [modelsLoading, setModelsLoading] = useState(false)
-  const [jobDesc, setJobDesc]       = useState('')
-  const [aiLoading, setAiLoading]   = useState(false)
-  const [aiStatus, setAiStatus]     = useState('')
-  const [aiPreview, setAiPreview]   = useState<string | null>(null)
-  const [prevJson, setPrevJson]     = useState<string | null>(null)
+  const [jobDesc, setJobDesc]         = useState('')
+  const [aiLoading, setAiLoading]     = useState(false)
+  const [aiStatus, setAiStatus]       = useState('')
+  const [aiPreview, setAiPreview]     = useState<{ en: CVData; es: CVData; explanations: AiChange[] } | null>(null)
+  const [prevJson, setPrevJson]       = useState<string | null>(null)
 
   const fetchNotifications = useCallback(async () => {
     setNLoading(true); setNError('')
@@ -147,19 +154,42 @@ export default function AdminPanel({ open, onClose, data, onUpdate, lang }: Prop
     }
     setAiLoading(true); setAiStatus('Calling Gemini...')
 
-    const prompt = `You are a senior tech recruiter and CV writer.
-Rewrite and optimize this CV JSON to best match the job description below.
-Rules: return ONLY valid JSON with the same structure as the input.
-Rewrite the "summary" field. Reorder "skillGroups" skills by relevance.
-Emphasize relevant bullets in "experience". Keep all data truthful.
+    const enJson = localStorage.getItem('cv_data_en') ?? json
+    const esJson = localStorage.getItem('cv_data_es') ?? json
+
+    const prompt = `You are a senior tech recruiter and bilingual CV writer (English + Spanish).
+Optimize BOTH language versions of this CV to best match the job description.
+
+Rules:
+- Return ONLY a valid JSON object with this exact structure (no markdown, no explanation outside JSON):
+{
+  "en": { ...optimized English CV with same structure as input },
+  "es": { ...optimized Spanish CV with same structure as input },
+  "explanations": [
+    {
+      "field": "which field was changed (e.g. summary, experience[0].bullets[2], skillGroups[1].skills[0].level)",
+      "what": "what was changed",
+      "why": "why this change helps match the job description",
+      "interviewTip": "a likely interview question about this topic and how to answer it confidently"
+    }
+  ]
+}
+- Rewrite the summary field in both languages.
+- Reorder skillGroups skills by relevance to the job.
+- Emphasize relevant bullets in experience. Add missing keywords from job description truthfully.
+- Keep all data truthful — do not invent experience.
+- Provide 5-10 explanations covering the most important changes.
 
 JOB DESCRIPTION:
 ${jobDesc}
 
-CURRENT CV JSON:
-${json}
+CURRENT CV (English):
+${enJson}
 
-Return only the optimized JSON, no markdown, no explanation.`
+CURRENT CV (Spanish):
+${esJson}
+
+Return only the JSON object described above.`
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`
 
@@ -173,7 +203,9 @@ Return only the optimized JSON, no markdown, no explanation.`
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const result = await res.json()
         const text: string = result.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
-        setAiPreview(text.replace(/```json|```/g, '').trim())
+        const cleaned = text.replace(/```json|```/g, '').trim()
+        const parsed = JSON.parse(cleaned) as { en: CVData; es: CVData; explanations: AiChange[] }
+        setAiPreview(parsed)
         setAiStatus('Review the proposal below before applying.')
         break
       } catch (err) {
@@ -182,15 +214,20 @@ Return only the optimized JSON, no markdown, no explanation.`
       }
     }
     setAiLoading(false)
-  }, [geminiKey, jobDesc, json])
+  }, [geminiKey, jobDesc, json, geminiModel])
 
   const handleApplyPreview = useCallback(() => {
     if (!aiPreview) return
     setPrevJson(json)
-    setJson(aiPreview)
+    const enStr = JSON.stringify(aiPreview.en, null, 2)
+    const esStr = JSON.stringify(aiPreview.es, null, 2)
+    localStorage.setItem('cv_data_en', enStr)
+    localStorage.setItem('cv_data_es', esStr)
+    setJson(lang === 'en' ? enStr : esStr)
+    onUpdate(lang === 'en' ? aiPreview.en : aiPreview.es)
     setAiPreview(null)
-    setAiStatus('✓ Applied — click Revert to undo')
-  }, [aiPreview, json])
+    setAiStatus('✓ Applied both EN+ES — click Revert to undo')
+  }, [aiPreview, json, lang, onUpdate])
 
   const handleDiscardPreview = useCallback(() => {
     setAiPreview(null)
@@ -366,7 +403,7 @@ Return only the optimized JSON, no markdown, no explanation.`
                     <div className="flex gap-2">
                       <select
                         value={geminiModel}
-                        onChange={(e) => { setGeminiModel(e.target.value); sessionStorage.setItem('gemini_model', e.target.value) }}
+                        onChange={(e) => { setGeminiModel(e.target.value); localStorage.setItem('gemini_model', e.target.value) }}
                         className="flex-1 bg-cyber-bg border border-cyber-border rounded-lg px-3 py-2 text-xs font-mono text-cyber-text outline-none focus:border-cyber-primary/50 transition-colors"
                       >
                         {modelList.length === 0 && (
@@ -403,36 +440,114 @@ Return only the optimized JSON, no markdown, no explanation.`
                 </div>
               )}
 
-              {/* AI PREVIEW MODAL */}
+              {/* AI PREVIEW MODAL — two columns */}
               <AnimatePresence>
                 {aiPreview && (
                   <motion.div
                     initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                    className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+                    className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm flex flex-col"
                   >
-                    <motion.div
-                      initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-                      exit={{ scale: 0.95, opacity: 0 }} transition={{ duration: 0.15 }}
-                      className="bg-cyber-surface border border-cyber-primary/40 rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden"
-                    >
-                      <div className="flex items-center justify-between px-5 py-4 border-b border-cyber-border">
-                        <span className="text-cyber-primary font-mono text-sm font-semibold flex items-center gap-2">
-                          <Sparkles size={14} /> Gemini Proposal — Review before applying
-                        </span>
-                        <button type="button" onClick={handleDiscardPreview} className="text-cyber-muted hover:text-cyber-text transition-colors">
+                    {/* Sticky header */}
+                    <div className="flex items-center justify-between px-6 py-3 border-b border-cyber-border bg-cyber-surface flex-shrink-0">
+                      <span className="text-cyber-primary font-mono text-sm font-semibold flex items-center gap-2">
+                        <Sparkles size={14} /> Gemini Proposal — Review before applying
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <ActionBtn onClick={handleApplyPreview} icon={<Save size={12} />}>Apply EN+ES</ActionBtn>
+                        <ActionBtn onClick={handleDiscardPreview} icon={<X size={12} />}>Discard</ActionBtn>
+                        <button type="button" onClick={handleDiscardPreview} className="ml-2 text-cyber-muted hover:text-cyber-text transition-colors">
                           <X size={16} />
                         </button>
                       </div>
-                      <textarea
-                        readOnly
-                        value={aiPreview}
-                        className="flex-1 bg-cyber-bg p-4 text-xs font-mono text-cyber-text outline-none resize-none overflow-y-auto"
-                      />
-                      <div className="flex gap-2 p-4 border-t border-cyber-border">
-                        <ActionBtn onClick={handleApplyPreview} icon={<Save size={12} />}>Apply</ActionBtn>
-                        <ActionBtn onClick={handleDiscardPreview} icon={<X size={12} />}>Discard</ActionBtn>
+                    </div>
+
+                    {/* Two columns */}
+                    <div className="flex flex-1 overflow-hidden">
+
+                      {/* Left — rendered CV preview */}
+                      <div className="flex-1 overflow-y-auto p-6 border-r border-cyber-border space-y-5">
+                        <p className="text-xs text-cyber-muted uppercase tracking-wider font-semibold">Proposed CV (EN)</p>
+
+                        {/* Name + title */}
+                        <div>
+                          <h2 className="text-lg font-bold text-cyber-text">{aiPreview.en.name}</h2>
+                          <p className="text-cyber-primary text-sm font-mono">{aiPreview.en.title}</p>
+                        </div>
+
+                        {/* Summary */}
+                        <div>
+                          <p className="text-xs text-cyber-primary uppercase tracking-wider mb-1">Summary</p>
+                          <p className="text-xs text-cyber-muted leading-relaxed">{aiPreview.en.summary}</p>
+                        </div>
+
+                        {/* Experience */}
+                        <div>
+                          <p className="text-xs text-cyber-primary uppercase tracking-wider mb-2">Experience</p>
+                          <div className="space-y-3">
+                            {aiPreview.en.experience?.map((exp, i) => (
+                              <div key={i} className="border border-cyber-border rounded-lg p-3">
+                                <p className="text-xs font-semibold text-cyber-text">{exp.role}</p>
+                                <p className="text-xs text-cyber-muted">{exp.company} · {exp.period}</p>
+                                <ul className="mt-2 space-y-1">
+                                  {exp.bullets?.map((b, j) => (
+                                    <li key={j} className="text-xs text-cyber-muted flex gap-2">
+                                      <span className="text-cyber-primary flex-shrink-0">›</span>
+                                      <span>{b}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Skills */}
+                        <div>
+                          <p className="text-xs text-cyber-primary uppercase tracking-wider mb-2">Skills</p>
+                          <div className="space-y-3">
+                            {aiPreview.en.skillGroups?.map((g, i) => (
+                              <div key={i}>
+                                <p className="text-xs font-semibold text-cyber-text mb-1">{g.category}</p>
+                                <div className="space-y-1">
+                                  {g.skills?.map((s, j) => (
+                                    <div key={j} className="flex items-center gap-2">
+                                      <span className="text-xs text-cyber-muted w-40 truncate">{s.name}</span>
+                                      <div className="flex-1 h-1.5 bg-cyber-border rounded-full overflow-hidden">
+                                        <div className="h-full bg-cyber-primary rounded-full" style={{ width: `${s.level}%` }} />
+                                      </div>
+                                      <span className="text-xs text-cyber-muted w-8 text-right">{s.level}%</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
-                    </motion.div>
+
+                      {/* Right — explanations */}
+                      <div className="w-96 flex-shrink-0 overflow-y-auto p-6 space-y-4">
+                        <p className="text-xs text-cyber-muted uppercase tracking-wider font-semibold">What changed & why — Study this</p>
+                        {aiPreview.explanations.map((ex, i) => (
+                          <div key={i} className="border border-cyber-border rounded-xl p-4 space-y-2">
+                            <p className="text-xs font-mono text-cyber-primary">{ex.field}</p>
+                            <div>
+                              <p className="text-[10px] text-cyber-muted uppercase tracking-wider">What changed</p>
+                              <p className="text-xs text-cyber-text leading-relaxed">{ex.what}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-cyber-muted uppercase tracking-wider">Why</p>
+                              <p className="text-xs text-cyber-muted leading-relaxed">{ex.why}</p>
+                            </div>
+                            <div className="bg-cyber-primary/10 border border-cyber-primary/20 rounded-lg p-2">
+                              <p className="text-[10px] text-cyber-primary uppercase tracking-wider mb-1">💡 Interview tip</p>
+                              <p className="text-xs text-cyber-text leading-relaxed">{ex.interviewTip}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
