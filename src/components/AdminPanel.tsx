@@ -14,13 +14,20 @@ interface Props {
   lang: Lang
 }
 
-type Tab = 'notifications' | 'cv' | 'ai'
+type Tab = 'notifications' | 'cv' | 'ai' | 'suggestions' | 'suggestions'
 
 interface AiChange {
   field: string
   what: string
   why: string
   interviewTip: string
+}
+
+interface SavedSuggestion {
+  id:           number
+  savedAt:      string
+  appliedLangs: ('en' | 'es')[]
+  explanations: AiChange[]
 }
 
 interface Notification {
@@ -59,6 +66,9 @@ export default function AdminPanel({ open, onClose, data, onUpdate, lang }: Prop
   const [aiStatus, setAiStatus]       = useState('')
   const [aiPreview, setAiPreview]     = useState<{ en: CVData; es: CVData; explanations: AiChange[] } | null>(null)
   const [prevJson, setPrevJson]       = useState<string | null>(null)
+  const [savedSuggestions, setSavedSuggestions] = useState<SavedSuggestion[]>(
+    () => JSON.parse(localStorage.getItem('ai_suggestions') ?? '[]')
+  )
 
   const fetchNotifications = useCallback(async () => {
     setNLoading(true); setNError('')
@@ -216,17 +226,31 @@ Return only the JSON object described above.`
     setAiLoading(false)
   }, [geminiKey, jobDesc, json, geminiModel])
 
-  const handleApplyPreview = useCallback(() => {
+  const handleApplyPreview = useCallback((langs: ('en' | 'es')[]) => {
     if (!aiPreview) return
     setPrevJson(json)
-    const enStr = JSON.stringify(aiPreview.en, null, 2)
-    const esStr = JSON.stringify(aiPreview.es, null, 2)
-    localStorage.setItem('cv_data_en', enStr)
-    localStorage.setItem('cv_data_es', esStr)
-    setJson(lang === 'en' ? enStr : esStr)
-    onUpdate(lang === 'en' ? aiPreview.en : aiPreview.es)
+    if (langs.includes('en')) {
+      const enStr = JSON.stringify(aiPreview.en, null, 2)
+      localStorage.setItem('cv_data_en', enStr)
+      if (lang === 'en') { setJson(enStr); onUpdate(aiPreview.en) }
+    }
+    if (langs.includes('es')) {
+      const esStr = JSON.stringify(aiPreview.es, null, 2)
+      localStorage.setItem('cv_data_es', esStr)
+      if (lang === 'es') { setJson(esStr); onUpdate(aiPreview.es) }
+    }
+    // Save suggestions to localStorage for re-reading (T05)
+    const saved = JSON.parse(localStorage.getItem('ai_suggestions') ?? '[]') as SavedSuggestion[]
+    const newEntry: SavedSuggestion = {
+      id:           Date.now(),
+      savedAt:      new Date().toLocaleString(),
+      appliedLangs: langs,
+      explanations: aiPreview.explanations,
+    }
+    localStorage.setItem('ai_suggestions', JSON.stringify([newEntry, ...saved].slice(0, 20)))
+    setSavedSuggestions([newEntry, ...saved].slice(0, 20))
     setAiPreview(null)
-    setAiStatus('✓ Applied both EN+ES — click Revert to undo')
+    setAiStatus(`✓ Applied ${langs.join('+')} — click Revert to undo`)
   }, [aiPreview, json, lang, onUpdate])
 
   const handleDiscardPreview = useCallback(() => {
@@ -273,6 +297,7 @@ Return only the JSON object described above.`
                 { id: 'notifications', label: 'Notifications', icon: <Bell size={13} />, badge: unread },
                 { id: 'cv',            label: 'CV Editor',     icon: <FileJson size={13} /> },
                 { id: 'ai',            label: 'AI Tailoring',  icon: <Sparkles size={13} /> },
+                { id: 'suggestions',  label: 'Study Notes',   icon: <Key size={13} />, badge: savedSuggestions.length },
               ] as const).map((t) => (
                 <button
                   key={t.id}
@@ -440,6 +465,44 @@ Return only the JSON object described above.`
                 </div>
               )}
 
+              {/* SUGGESTIONS TAB */}
+              {tab === 'suggestions' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-cyber-muted">{savedSuggestions.length} saved sessions</span>
+                    <button type="button"
+                      onClick={() => { localStorage.removeItem('ai_suggestions'); setSavedSuggestions([]) }}
+                      className="text-xs text-red-400 hover:text-red-300 transition-colors">
+                      Clear all
+                    </button>
+                  </div>
+                  {savedSuggestions.length === 0 && (
+                    <p className="text-cyber-muted text-sm text-center py-12">No saved suggestions yet. Apply an AI proposal to save study notes.</p>
+                  )}
+                  {savedSuggestions.map((s) => (
+                    <div key={s.id} className="border border-cyber-border rounded-xl overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-2 bg-cyber-bg border-b border-cyber-border">
+                        <span className="text-xs text-cyber-muted font-mono">{s.savedAt}</span>
+                        <span className="text-xs text-cyber-primary">Applied: {s.appliedLangs.join('+').toUpperCase()}</span>
+                      </div>
+                      <div className="p-4 space-y-3">
+                        {s.explanations.map((ex, i) => (
+                          <div key={i} className="border border-cyber-border/50 rounded-lg p-3 space-y-2">
+                            <p className="text-xs font-mono text-cyber-primary">{ex.field}</p>
+                            <p className="text-xs text-cyber-text">{ex.what}</p>
+                            <p className="text-xs text-cyber-muted">{ex.why}</p>
+                            <div className="bg-cyber-primary/10 border border-cyber-primary/20 rounded p-2">
+                              <p className="text-[10px] text-cyber-primary uppercase tracking-wider mb-1">💡 Interview tip</p>
+                              <p className="text-xs text-cyber-text">{ex.interviewTip}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* AI PREVIEW MODAL — two columns */}
               <AnimatePresence>
                 {aiPreview && (
@@ -453,7 +516,9 @@ Return only the JSON object described above.`
                         <Sparkles size={14} /> Gemini Proposal — Review before applying
                       </span>
                       <div className="flex items-center gap-2">
-                        <ActionBtn onClick={handleApplyPreview} icon={<Save size={12} />}>Apply EN+ES</ActionBtn>
+                        <ActionBtn onClick={() => handleApplyPreview(['en'])} icon={<Save size={12} />}>Apply EN</ActionBtn>
+                        <ActionBtn onClick={() => handleApplyPreview(['es'])} icon={<Save size={12} />}>Apply ES</ActionBtn>
+                        <ActionBtn onClick={() => handleApplyPreview(['en','es'])} icon={<Save size={12} />}>Apply Both</ActionBtn>
                         <ActionBtn onClick={handleDiscardPreview} icon={<X size={12} />}>Discard</ActionBtn>
                         <button type="button" onClick={handleDiscardPreview} className="ml-2 text-cyber-muted hover:text-cyber-text transition-colors">
                           <X size={16} />
