@@ -44,6 +44,9 @@ export default function AdminPanel({ open, onClose, data, onUpdate, lang }: Prop
 
   // --- AI state ---
   const [geminiKey, setGeminiKey]   = useState(() => sessionStorage.getItem('gemini_key') ?? '')
+  const [geminiModel, setGeminiModel] = useState(() => sessionStorage.getItem('gemini_model') ?? 'gemini-2.0-flash-latest')
+  const [modelList, setModelList]   = useState<string[]>([])
+  const [modelsLoading, setModelsLoading] = useState(false)
   const [jobDesc, setJobDesc]       = useState('')
   const [aiLoading, setAiLoading]   = useState(false)
   const [aiStatus, setAiStatus]     = useState('')
@@ -121,6 +124,23 @@ export default function AdminPanel({ open, onClose, data, onUpdate, lang }: Prop
     setAiStatus('API key saved to session')
   }, [geminiKey])
 
+  const fetchModels = useCallback(async () => {
+    if (!geminiKey) { setAiStatus('Save API key first'); return }
+    setModelsLoading(true)
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json() as { models: { name: string; supportedGenerationMethods: string[] }[] }
+      const names = data.models
+        .filter((m) => m.supportedGenerationMethods.includes('generateContent'))
+        .map((m) => m.name.replace('models/', ''))
+      setModelList(names)
+    } catch (e) {
+      setAiStatus(`Failed to fetch models: ${e}`)
+    }
+    setModelsLoading(false)
+  }, [geminiKey])
+
   const handleAITailor = useCallback(async () => {
     if (!geminiKey || !jobDesc.trim()) {
       setAiStatus('Add Gemini API key and paste job description first'); return
@@ -141,7 +161,7 @@ ${json}
 
 Return only the optimized JSON, no markdown, no explanation.`
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`
 
     for (let attempt = 1; attempt <= 5; attempt++) {
       try {
@@ -340,6 +360,26 @@ Return only the optimized JSON, no markdown, no explanation.`
                       <ActionBtn onClick={handleSaveKey} icon={<Save size={12} />}>Save</ActionBtn>
                     </div>
                     <p className="text-cyber-muted text-xs mt-1">Stored in sessionStorage only — never sent anywhere except Gemini.</p>
+                  </Section>
+
+                  <Section icon={<Sparkles size={14} />} title="Model">
+                    <div className="flex gap-2">
+                      <select
+                        value={geminiModel}
+                        onChange={(e) => { setGeminiModel(e.target.value); sessionStorage.setItem('gemini_model', e.target.value) }}
+                        className="flex-1 bg-cyber-bg border border-cyber-border rounded-lg px-3 py-2 text-xs font-mono text-cyber-text outline-none focus:border-cyber-primary/50 transition-colors"
+                      >
+                        {modelList.length === 0 && (
+                          <option value={geminiModel}>{geminiModel}</option>
+                        )}
+                        {modelList.map((m) => (
+                          <option key={m} value={m}>{m}</option>
+                        ))}
+                      </select>
+                      <ActionBtn onClick={fetchModels} disabled={modelsLoading} icon={<RefreshCw size={12} className={modelsLoading ? 'animate-spin' : ''} />}>
+                        {modelsLoading ? 'Loading...' : 'Fetch'}
+                      </ActionBtn>
+                    </div>
                   </Section>
 
                   <Section icon={<Sparkles size={14} />} title="AI CV Tailoring (Gemini)">
