@@ -4,7 +4,7 @@ import { Terminal, X, Minus, Square } from 'lucide-react'
 import type { Translations } from '../i18n/translations'
 
 interface Line {
-  type: 'input' | 'output' | 'error' | 'success' | 'info'
+  type: 'input' | 'output' | 'error' | 'success' | 'info' | 'banner'
   text: string
 }
 
@@ -14,6 +14,7 @@ const COLOR: Record<Line['type'], string> = {
   error:   'text-red-400',
   success: 'text-cyber-primary',
   info:    'text-cyber-warn',
+  banner:  'text-cyber-warn',
 }
 
 const COMMANDS: Record<string, () => Line[]> = {
@@ -102,11 +103,9 @@ export default function TerminalConsole({ embedded = false, tr, onAskAI }: { emb
   const cmdNotFound = tr?.cmdNotFound ?? 'command not found'
 
   const banner: Line[] = [
-    { type: 'info',   text: '┌─────────────────────────────────────────────────────┐' },
-    { type: 'info',   text: '│  Alejandro Chataing -- AI-Augmented Tech Lead v3.7.1 │' },
-    { type: 'info',   text: '│  Node: caracas-ve-01 | MCP: mcp-code-context          │' },
-    { type: 'info',   text: '│  Kiro IDE | Amazon Q | Gemini | Antigravity IDE       │' },
-    { type: 'info',   text: '└─────────────────────────────────────────────────────┘' },
+    { type: 'banner', text: 'Alejandro Chataing — AI-Augmented Tech Lead v3.7.1' },
+    { type: 'banner', text: 'Node: caracas-ve-01 | MCP: mcp-code-context' },
+    { type: 'banner', text: 'Kiro IDE | Amazon Q | Gemini | Antigravity IDE' },
     { type: 'output', text: typeHelp },
   ]
 
@@ -190,17 +189,48 @@ export default function TerminalConsole({ embedded = false, tr, onAskAI }: { emb
         onClick={() => inputRef.current?.focus()}
       >
         <AnimatePresence initial={false}>
-          {lines.map((line, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, x: -4 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.12 }}
-              className={`leading-5 whitespace-pre-wrap break-words ${COLOR[line.type]}`}
-            >
-              {line.text || '\u00A0'}
-            </motion.div>
-          ))}
+          {(() => {
+            // Group consecutive banner lines into one bordered block
+            const elements: React.ReactNode[] = []
+            let i = 0
+            while (i < lines.length) {
+              if (lines[i].type === 'banner') {
+                const bannerLines: Line[] = []
+                while (i < lines.length && lines[i].type === 'banner') {
+                  bannerLines.push(lines[i])
+                  i++
+                }
+                elements.push(
+                  <motion.div
+                    key={`banner-${i}`}
+                    initial={{ opacity: 0, x: -4 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.12 }}
+                    className="border border-cyber-warn rounded px-3 py-2 my-1 text-cyber-warn"
+                  >
+                    {bannerLines.map((bl, bi) => (
+                      <div key={bi} className="leading-5">{bl.text}</div>
+                    ))}
+                  </motion.div>
+                )
+              } else {
+                const line = lines[i]
+                elements.push(
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, x: -4 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.12 }}
+                    className={`leading-5 whitespace-pre-wrap break-words ${COLOR[line.type]}`}
+                  >
+                    {line.text || '\u00A0'}
+                  </motion.div>
+                )
+                i++
+              }
+            }
+            return elements
+          })()}
         </AnimatePresence>
         <div ref={bottomRef} />
       </div>
