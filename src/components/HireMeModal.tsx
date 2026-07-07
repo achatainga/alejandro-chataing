@@ -12,17 +12,18 @@ const PKEY = import.meta.env.VITE_EMAILJS_PUBLIC_KEY  ?? 'hwn1qzhXQfhh35cx0'
 
 const MAX_BYTES = 5 * 1024 * 1024
 
-interface Props { open: boolean; onClose: () => void; tr: Translations }
+interface Prefill { name?: string; company?: string; email?: string; phone?: string; message?: string }
+interface Props { open: boolean; onClose: () => void; tr: Translations; prefill?: Prefill }
 type Status = 'idle' | 'sending' | 'sent' | 'error'
 
-export default function HireMeModal({ open, onClose, tr }: Props) {
+export default function HireMeModal({ open, onClose, tr, prefill }: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const [name,       setName]       = useState('')
-  const [company,    setCompany]    = useState('')
-  const [email,      setEmail]      = useState('')
-  const [phone,      setPhone]      = useState('')
-  const [message,    setMessage]    = useState('')
+  const [name,       setName]       = useState(prefill?.name    ?? '')
+  const [company,    setCompany]    = useState(prefill?.company ?? '')
+  const [email,      setEmail]      = useState(prefill?.email   ?? '')
+  const [phone,      setPhone]      = useState(prefill?.phone   ?? '')
+  const [message,    setMessage]    = useState(prefill?.message ?? '')
   const [fileName,   setFileName]   = useState('')
   const [fileObj,    setFileObj]    = useState<File | null>(null)
   const [status,     setStatus]     = useState<Status>('idle')

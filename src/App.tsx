@@ -10,6 +10,7 @@ import ShowcaseSection from './components/ShowcaseSection'
 import GitHubSection from './components/GitHubSection'
 import AdminPanel from './components/AdminPanel'
 import HireMeModal from './components/HireMeModal'
+import AIChatWidget from './components/AIChatWidget'
 import PrintCV from './components/PrintCV'
 import { defaultCVData } from './utils/defaultData'
 import { t } from './i18n/translations'
@@ -42,6 +43,7 @@ export default function App() {
   const [adminOpen, setAdminOpen] = useState(false)
   const [adminAuthOpen, setAdminAuthOpen] = useState(false)
   const [hireMeOpen, setHireMeOpen] = useState(false)
+  const [hireMePrefill, setHireMePrefill] = useState<{ name: string; company: string; email: string; phone: string; message: string } | undefined>()
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
 
   const logoClicksRef = useRef(0)
@@ -113,7 +115,15 @@ export default function App() {
         onSuccess={() => { setAdminAuthOpen(false); setAdminOpen(true) }}
       />
       <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} data={cvData} onUpdate={setCVData} lang={lang} />
-      <HireMeModal open={hireMeOpen} onClose={() => setHireMeOpen(false)} tr={tr} />
+      <HireMeModal open={hireMeOpen} onClose={() => setHireMeOpen(false)} tr={tr} prefill={hireMePrefill} />
+      <AIChatWidget
+        cvData={cvData}
+        onOpenHireMe={(prefill) => { setHireMePrefill(prefill); setHireMeOpen(true) }}
+      />
+      <AIChatWidget
+        cvData={cvData}
+        onOpenHireMe={(prefill) => { setHireMePrefill(prefill); setHireMeOpen(true) }}
+      />
       <div className="print-cv-root">
         <PrintCV data={cvData} />
       </div>
