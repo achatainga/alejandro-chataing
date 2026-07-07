@@ -218,12 +218,15 @@ function AdminAuthModal({ open, onClose, onSuccess }: {
           </button>
         </div>
         <form onSubmit={handleSubmit} className="p-5 space-y-3">
+          <input type="text" name="username" value="admin" readOnly className="hidden" autoComplete="username" />
           <input
             type="password"
+            name="password"
             value={pwd}
             onChange={(e) => { setPwd(e.target.value); setErr(false) }}
             placeholder="Password"
             autoFocus
+            autoComplete="current-password"
             className="w-full bg-cyber-bg border border-cyber-border rounded-lg px-3 py-2 text-sm text-cyber-text outline-none focus:border-cyber-primary/50 transition-colors font-mono"
           />
           {err && <p className="text-red-400 text-xs font-mono">Access denied.</p>}
