@@ -44,6 +44,7 @@ export default function App() {
   const [adminAuthOpen, setAdminAuthOpen] = useState(false)
   const [hireMeOpen, setHireMeOpen] = useState(false)
   const [hireMePrefill, setHireMePrefill] = useState<{ name: string; company: string; email: string; phone: string; message: string } | undefined>()
+  const [chatForceOpen, setChatForceOpen] = useState(false)
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
 
   const logoClicksRef = useRef(0)
@@ -103,7 +104,7 @@ export default function App() {
         <ExperienceTimeline experience={cvData.experience} tr={tr} />
         <ProjectsGrid projects={cvData.projects} tr={tr} />
         <SkillsRadar skillGroups={cvData.skillGroups} tr={tr} />
-        <ShowcaseSection tr={tr} />
+        <ShowcaseSection tr={tr} onAskAI={() => setChatForceOpen(true)} />
         <GitHubSection tr={tr} />
         <EducationSection data={cvData} tr={tr} />
         <Footer data={cvData} tr={tr} onHireMe={() => setHireMeOpen(true)} />
@@ -119,10 +120,8 @@ export default function App() {
       <AIChatWidget
         cvData={cvData}
         onOpenHireMe={(prefill) => { setHireMePrefill(prefill); setHireMeOpen(true) }}
-      />
-      <AIChatWidget
-        cvData={cvData}
-        onOpenHireMe={(prefill) => { setHireMePrefill(prefill); setHireMeOpen(true) }}
+        forceOpen={chatForceOpen}
+        onForceOpenHandled={() => setChatForceOpen(false)}
       />
       <div className="print-cv-root">
         <PrintCV data={cvData} />

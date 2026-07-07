@@ -7,7 +7,7 @@ import type { Translations } from '../i18n/translations'
 
 type Tab = 'terminal' | 'ast'
 
-export default function ShowcaseSection({ tr }: { tr: Translations }) {
+export default function ShowcaseSection({ tr, onAskAI }: { tr: Translations; onAskAI?: () => void }) {
   const [active, setActive] = useState<Tab>('terminal')
 
   const TABS: { id: Tab; label: string; icon: React.ReactNode; desc: string }[] = [
@@ -79,7 +79,7 @@ export default function ShowcaseSection({ tr }: { tr: Translations }) {
           exit={{ opacity: 0, y: -10 }}
           transition={{ duration: 0.25 }}
         >
-          {active === 'terminal' && <TerminalConsole embedded tr={tr} />}
+          {active === 'terminal' && <TerminalConsole embedded tr={tr} onAskAI={onAskAI} />}
           {active === 'ast' && <ASTVisualizer embedded tr={tr} />}
         </motion.div>
       </AnimatePresence>

@@ -24,6 +24,7 @@ const COMMANDS: Record<string, () => Line[]> = {
     { type: 'output',  text: '  ai-stack    -- Daily AI development tools' },
     { type: 'output',  text: '  skills      -- Skill matrix' },
     { type: 'output',  text: '  contact     -- Contact information' },
+    { type: 'output',  text: '  ask         -- Chat with AI about Alejandro' },
     { type: 'output',  text: '  clear       -- Clear terminal' },
   ],
   whoami: () => [
@@ -96,7 +97,7 @@ const COMMANDS: Record<string, () => Line[]> = {
   ],
 }
 
-export default function TerminalConsole({ embedded = false, tr }: { embedded?: boolean; tr?: Translations }) {
+export default function TerminalConsole({ embedded = false, tr, onAskAI }: { embedded?: boolean; tr?: Translations; onAskAI?: () => void }) {
   const typeHelp   = tr?.typeHelp   ?? 'Type "help" to see available commands.'
   const cmdNotFound = tr?.cmdNotFound ?? 'command not found'
 
@@ -129,6 +130,14 @@ export default function TerminalConsole({ embedded = false, tr }: { embedded?: b
     const echo: Line = { type: 'input', text: `alejandro@caracas-ve-01:~$ ${cmd}` }
 
     if (trimmed === 'clear') { setLines(banner); return }
+
+    if (trimmed === 'ask' || trimmed === 'chat') {
+      setLines((prev) => [...prev, echo, { type: 'success', text: '> Opening AI chat assistant...' }])
+      setHistory((prev) => [cmd, ...prev].slice(0, 50))
+      setHistIdx(-1)
+      setTimeout(() => onAskAI?.(), 300)
+      return
+    }
 
     const handler = COMMANDS[trimmed]
     const result: Line[] = handler

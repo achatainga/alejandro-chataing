@@ -8,8 +8,13 @@ service cloud.firestore {
       allow read, update, delete: if false;
     }
 
-    // config/traffic_state: read+write from client (rate limit tracking)
-    // config/gemini_rotation: read+write from client (key rotation)
+    // chat_sessions: write-only from client (AI chat auto-save)
+    match /chat_sessions/{sessionId} {
+      allow create, update: if true;
+      allow read, delete: if false;
+    }
+
+    // config/traffic_state + config/gemini_rotation: read+write from client
     match /config/{configId} {
       allow read, write: if configId in ['traffic_state', 'gemini_rotation'];
     }

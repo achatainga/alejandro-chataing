@@ -58,6 +58,8 @@ interface ContactInfo {
 interface Props {
   cvData:       CVData
   onOpenHireMe: (prefill: ContactInfo & { message: string }) => void
+  forceOpen?:   boolean
+  onForceOpenHandled?: () => void
 }
 
 // ─── System prompt builder ────────────────────────────────────────────────────
@@ -108,8 +110,12 @@ function genSessionId(): string {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function AIChatWidget({ cvData, onOpenHireMe }: Props) {
+export default function AIChatWidget({ cvData, onOpenHireMe, forceOpen, onForceOpenHandled }: Props) {
   const [open, setOpen]           = useState(false)
+
+  useEffect(() => {
+    if (forceOpen && !open) { setOpen(true); onForceOpenHandled?.() }
+  }, [forceOpen, open, onForceOpenHandled])
   const [messages, setMessages]   = useState<Message[]>([])
   const [input, setInput]         = useState('')
   const [loading, setLoading]     = useState(false)
