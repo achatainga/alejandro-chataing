@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { X, Save, Download, Upload, Sparkles, Key, FileJson, Bell, MessageSquare, Mail, RefreshCw, CheckCheck, RotateCcw } from 'lucide-react'
 import { collection, query, orderBy, limit, getDocs, doc, updateDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import { saveGeminiModel, getGeminiModel, getNextGeminiKey } from '../utils/adaptiveRateLimit'
+import { saveGeminiModel, getGeminiModel, getNextGeminiKey, markKeyFailed, markKeySuccess } from '../utils/adaptiveRateLimit'
 import { defaultCVData } from '../utils/defaultData'
 import type { CVData } from '../types/cv'
 import type { Lang } from '../i18n/translations'
@@ -232,40 +232,53 @@ Return only the JSON object described above.`
     const model = await getGeminiModel()
     setAiStatus('Calling Gemini...')
 
-    // Try each key × each model until one succeeds
-    const FALLBACKS = ['gemini-flash-latest', 'gemini-2.0-flash-lite', 'gemini-1.0-pro']
-    const modelsToTry = [model, ...FALLBACKS.filter((m) => m !== model)]
-    let lastError = ''
+    // Key rotation only — no model rotation. User controls model via the select.
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const kd = await getNextGeminiKey()
+      if (!kd) { setAiStatus('No Gemini keys configured.'); setAiLoading(false); return }
+      try {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${kd.key}`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) }
+        )
 
-    outer: for (const tryModel of modelsToTry) {
-      for (let attempt = 0; attempt < 3; attempt++) {
-        const kd = await getNextGeminiKey()
-        if (!kd) break outer
-        try {
-          const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${tryModel}:generateContent?key=${kd.key}`,
-            { method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) }
-          )
-          if (res.status === 503) { lastError = '503'; continue }
-          if (!res.ok) { lastError = `HTTP ${res.status}`; continue }
-          const result = await res.json()
-          const text: string = result.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
-          const cleaned = text.replace(/```json|```/g, '').trim()
-          const parsed = JSON.parse(cleaned) as { en: CVData; es: CVData; explanations: AiChange[] }
-          setAiPreview(parsed)
-          // Pre-select all changes so Apply Selected works immediately
-          setSelectedChanges(new Set(parsed.explanations.map((_, i) => i)))
-          setAiStatus('Review the proposal below before applying.')
+        if (res.status === 503) {
+          setAiStatus(`⚠ Model "${model}" is overloaded. Select a different model from the dropdown and try again.`)
           setAiLoading(false)
-          return // success
-        } catch (err) {
-          lastError = String(err)
-          await new Promise((r) => setTimeout(r, 800))
+          return
         }
+
+        if (res.status === 429 || res.status === 403) {
+          await markKeyFailed(kd.index)
+          setAiStatus(`Key ${attempt + 1}/4 failed (${res.status}), trying next key...`)
+          continue
+        }
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({})) as { error?: { message?: string } }
+          setAiStatus(`Error: ${errData?.error?.message ?? `HTTP ${res.status}`}`)
+          setAiLoading(false)
+          return
+        }
+
+        await markKeySuccess(kd.index)
+        const result = await res.json()
+        const text: string = result.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+        const cleaned = text.replace(/```json|```/g, '').trim()
+        const parsed = JSON.parse(cleaned) as { en: CVData; es: CVData; explanations: AiChange[] }
+        setAiPreview(parsed)
+        setSelectedChanges(new Set(parsed.explanations.map((_, i) => i)))
+        setAiStatus('Review the proposal below before applying.')
+        setAiLoading(false)
+        return
+      } catch (err) {
+        setAiStatus(`Parse error: ${err}`)
+        setAiLoading(false)
+        return
       }
     }
-    setAiStatus(`Error: ${lastError || 'All models unavailable'}`)
+    setAiStatus('All API keys exhausted. Please add new keys or try again later.')
     setAiLoading(false)
   }, [jobDesc, json, lang, onUpdate])
 

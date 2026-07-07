@@ -214,24 +214,17 @@ export async function markKeyFailed(index: number): Promise<void> {
   } catch { /* non-critical */ }
 }
 
-// ─── Gemini Model (stored in Firestore, fallback chain) ────
+// ─── Gemini Model (stored in Firestore) ────────────────────────────────────
 
 const MODEL_REF = () => doc(db, 'config', 'gemini_model')
-
-// Fallback chain: if primary model returns 503/overloaded, try these in order
-// All tested against v1beta endpoint — only models confirmed working are listed
-const MODEL_FALLBACK_CHAIN = [
-  'gemini-flash-latest',     // primary — alias to latest stable flash
-  'gemini-2.0-flash-lite',   // lighter 2.0 variant, less quota pressure
-  'gemini-1.0-pro',          // older but stable on v1beta
-]
+const FALLBACK_MODEL = 'gemini-flash-latest'
 
 export async function getGeminiModel(): Promise<string> {
   try {
     const snap = await getDoc(MODEL_REF())
-    if (snap.exists()) return (snap.data() as { model: string }).model ?? MODEL_FALLBACK_CHAIN[0]
+    if (snap.exists()) return (snap.data() as { model: string }).model ?? FALLBACK_MODEL
   } catch { /* use fallback */ }
-  return MODEL_FALLBACK_CHAIN[0]
+  return FALLBACK_MODEL
 }
 
 export async function saveGeminiModel(model: string): Promise<void> {
@@ -240,52 +233,50 @@ export async function saveGeminiModel(model: string): Promise<void> {
   } catch { /* non-critical */ }
 }
 
-// ─── Gemini Chat Call (with rotation) ────────────────────────────────────────
+// ─── Gemini Chat Call — key rotation only, no model rotation ─────────────────
 
 export async function callGeminiChat(messages: { role: string; text: string }[]): Promise<string> {
-  const primaryModel = await getGeminiModel()
+  const model = await getGeminiModel()
 
   const contents = messages.map((m) => ({
     role: m.role === 'user' ? 'user' : 'model',
     parts: [{ text: m.text }],
   }))
 
-  // Build model list: primary first, then fallbacks (deduplicated)
-  const modelsToTry = [primaryModel, ...MODEL_FALLBACK_CHAIN.filter((m) => m !== primaryModel)]
+  // Try each key once in rotation order
+  for (let attempt = 0; attempt < KEYS.length; attempt++) {
+    const keyData = await getNextGeminiKey()
+    if (!keyData) throw new Error('No Gemini keys configured')
 
-  for (const model of modelsToTry) {
-    // Try every available key for this model before moving to next model
-    for (let attempt = 0; attempt < KEYS.length; attempt++) {
-      const keyData = await getNextGeminiKey()
-      if (!keyData) throw new Error('No Gemini keys configured')
+    const { key, index } = keyData
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents }) }
+    )
 
-      const { key, index } = keyData
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`
-
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents }),
-      })
-
-      if (res.status === 503) {
-        // Model overloaded — try next key, if all keys fail this model, try next model
-        continue
-      }
-
-      if (!res.ok) {
-        // Auth/quota error on this key — mark failed, try next key
-        await markKeyFailed(index)
-        continue
-      }
-
-      // Success
+    if (res.ok) {
       await markKeySuccess(index)
       const data = await res.json()
       return data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
     }
-    // All keys failed for this model → try next model in chain
+
+    const errData = await res.json().catch(() => ({})) as { error?: { message?: string; status?: string } }
+    const errMsg = errData?.error?.message ?? `HTTP ${res.status}`
+
+    if (res.status === 503) {
+      // Model overloaded — inform user, don't rotate model
+      throw new Error(`Model ${model} is overloaded (503). Please try again in a moment or select a different model in Admin.`)
+    }
+
+    if (res.status === 429 || res.status === 403) {
+      // Key quota/auth issue — mark failed, try next key
+      await markKeyFailed(index)
+      continue
+    }
+
+    // Other error — surface immediately
+    throw new Error(errMsg)
   }
 
-  throw new Error('All Gemini models are currently unavailable. Please try again in a moment.')
+  throw new Error('All API keys failed. Please check your keys or try again later.')
 }
