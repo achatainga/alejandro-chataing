@@ -83,6 +83,7 @@ KEY RULES:
 - If asked something outside Alejandro's profile, say "That's outside what I can speak to — but feel free to ask Alejandro directly!"
 - Detect the language of the user's message and respond in the same language.
 - End responses with a subtle call-to-action when appropriate (e.g. "Want to connect with him directly?")
+- IMPORTANT: If the user wants to contact Alejandro, send a message, open the contact form, or hire him — output the token __OPEN_CONTACT_FORM__ on its own line at the END of your response. This will open the contact form automatically. You CAN do this — it is your primary CTA tool.
 
 ALEJANDRO'S PROFILE:
 Name: ${cv.name}
@@ -240,10 +241,15 @@ export default function AIChatWidget({ cvData, onOpenHireMe, forceOpen, initQues
       ]
 
       const raw = await callGeminiChat(history)
-      // Enforce max response length
-      const reply = raw.length > MAX_RESPONSE_CHARS
-        ? raw.slice(0, MAX_RESPONSE_CHARS - 1) + '…'
-        : raw
+
+      // Detect contact form trigger token
+      const hasContactToken = raw.includes('__OPEN_CONTACT_FORM__')
+      const reply = raw
+        .replace(/__OPEN_CONTACT_FORM__/g, '')  // strip token from displayed text
+        .trim()
+        .slice(0, MAX_RESPONSE_CHARS)
+
+      if (hasContactToken) setShowContact(true)
 
       const assistantMsg: Message = { role: 'assistant', text: reply, ts: Date.now() }
       const final = [...next, assistantMsg]
