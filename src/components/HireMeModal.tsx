@@ -1,21 +1,16 @@
-/**
- * HireMeModal
- * - File upload via Cloudinary (free tier, unsigned preset)
- * - Email notification via EmailJS
- * - WhatsApp fallback
- */
 import { useState, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, MessageSquare, Paperclip, Send, CheckCircle } from 'lucide-react'
+import { X, MessageSquare, Paperclip, Send, CheckCircle, AlertCircle } from 'lucide-react'
 import emailjs from '@emailjs/browser'
 import { uploadToCloudinary } from '../utils/cloudinaryUpload'
+import { saveHireMeNotification, saveWhatsAppContact } from '../utils/firebaseNotifications'
 import type { Translations } from '../i18n/translations'
 
 const SVC  = import.meta.env.VITE_EMAILJS_SERVICE_ID  ?? 'service_eeq90j4'
 const TPL  = import.meta.env.VITE_EMAILJS_TEMPLATE_ID ?? 'template_92l57sh'
 const PKEY = import.meta.env.VITE_EMAILJS_PUBLIC_KEY  ?? 'hwn1qzhXQfhh35cx0'
 
-const MAX_BYTES = 5 * 1024 * 1024  // 5 MB
+const MAX_BYTES = 5 * 1024 * 1024
 
 interface Props { open: boolean; onClose: () => void; tr: Translations }
 type Status = 'idle' | 'sending' | 'sent' | 'error'
@@ -32,6 +27,7 @@ export default function HireMeModal({ open, onClose, tr }: Props) {
   const [fileObj,    setFileObj]    = useState<File | null>(null)
   const [status,     setStatus]     = useState<Status>('idle')
   const [errMsg,     setErrMsg]     = useState('')
+  const [attachWarn, setAttachWarn] = useState('')
 
   const clearFile = useCallback(() => {
     setFileName(''); setFileObj(null)
@@ -42,33 +38,41 @@ export default function HireMeModal({ open, onClose, tr }: Props) {
     const file = e.target.files?.[0]
     if (!file) return
     if (file.size > MAX_BYTES) { setErrMsg(tr.fileTooLarge); return }
-    setFileName(file.name)
-    setFileObj(file)
-    setErrMsg('')
+    setFileName(file.name); setFileObj(file); setErrMsg('')
   }, [tr])
 
   const handleSend = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
     if (!name.trim() || !email.trim()) { setErrMsg(tr.nameRequired); return }
-    setStatus('sending'); setErrMsg('')
+    setStatus('sending'); setErrMsg(''); setAttachWarn('')
+
+    // 1. Try attachment upload — non-blocking
+    let attachmentUrl = ''
+    if (fileObj) {
+      try {
+        attachmentUrl = await uploadToCloudinary(fileObj)
+      } catch {
+        setAttachWarn(tr.attachmentFailed ?? 'Attachment failed to upload — sending email without it.')
+      }
+    }
 
     try {
-      // 1. Upload file to Cloudinary if provided
-      let attachmentUrl = ''
-      if (fileObj) {
-        attachmentUrl = await uploadToCloudinary(fileObj)
-      }
-
-      // 2. Send email via EmailJS with download link
+      // 2. Send email
       await emailjs.send(SVC, TPL, {
-        from_name:        name,
-        from_company:     company        || '—',
-        reply_to:         email,
-        phone:            phone          || '—',
-        message:          message        || '(no message)',
-        attachment_name:  fileName       || '(none)',
-        attachment_url:   attachmentUrl  || '(no attachment)',
+        from_name:       name,
+        from_company:    company       || '—',
+        reply_to:        email,
+        phone:           phone         || '—',
+        message:         message       || '(no message)',
+        attachment_name: fileName      || '(none)',
+        attachment_url:  attachmentUrl || '(no attachment)',
       }, PKEY)
+
+      // 3. Save to Firestore (fire-and-forget)
+      saveHireMeNotification({
+        name, company, email, phone, message,
+        attachmentUrl, attachmentName: fileName,
+      }).catch(console.error)
 
       setStatus('sent')
     } catch (err) {
@@ -82,13 +86,15 @@ export default function HireMeModal({ open, onClose, tr }: Props) {
     const text = encodeURIComponent(
       `Hi Alejandro! ${name ? `I'm ${name}` : ''}${company ? ` from ${company}` : ''}. ${message || "I'd like to discuss an opportunity."}`
     )
+    // Save to Firestore (fire-and-forget)
+    saveWhatsAppContact({ name, company, message }).catch(console.error)
     window.open(`https://wa.me/584241668876?text=${text}`, '_blank')
     onClose()
   }, [name, company, message, onClose])
 
   const reset = useCallback(() => {
     setName(''); setCompany(''); setEmail(''); setPhone('')
-    setMessage(''); clearFile(); setStatus('idle'); setErrMsg('')
+    setMessage(''); clearFile(); setStatus('idle'); setErrMsg(''); setAttachWarn('')
   }, [clearFile])
 
   const handleClose = useCallback(() => { reset(); onClose() }, [reset, onClose])
@@ -130,6 +136,11 @@ export default function HireMeModal({ open, onClose, tr }: Props) {
                   <CheckCircle size={40} className="text-cyber-accent" />
                   <p className="text-cyber-accent font-semibold">{tr.messageSent}</p>
                   <p className="text-cyber-muted text-sm text-center">{tr.replySoon}</p>
+                  {attachWarn && (
+                    <p className="text-yellow-400 text-xs text-center flex items-center gap-1">
+                      <AlertCircle size={12} /> {attachWarn}
+                    </p>
+                  )}
                   <button type="button" onClick={handleClose} className="mt-2 px-6 py-2 bg-cyber-primary text-cyber-bg text-sm font-semibold rounded-lg hover:bg-cyber-primary/90 transition-colors">
                     {tr.close}
                   </button>
@@ -137,7 +148,7 @@ export default function HireMeModal({ open, onClose, tr }: Props) {
               ) : (
                 <form onSubmit={handleSend} className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label={tr.nameLabel + ' *'} value={name}    onChange={setName}    placeholder="Jane Smith"   required />
+                    <Field label={tr.nameLabel + ' *'} value={name}    onChange={setName}    placeholder="Jane Smith"  required />
                     <Field label={tr.companyLabel}      value={company} onChange={setCompany} placeholder="Acme Inc." />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
@@ -155,7 +166,6 @@ export default function HireMeModal({ open, onClose, tr }: Props) {
                     />
                   </div>
 
-                  {/* File attachment */}
                   <div>
                     <label className="block text-xs text-cyber-muted mb-1">
                       {tr.attachmentLabel}
@@ -178,8 +188,11 @@ export default function HireMeModal({ open, onClose, tr }: Props) {
                       <input ref={fileRef} type="file" className="hidden" onChange={handleFileChange}
                         accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg" />
                     </div>
-                    {fileName && (
-                      <p className="text-cyber-accent text-xs mt-1">{tr.fileReady}: {fileName}</p>
+                    {fileName && <p className="text-cyber-accent text-xs mt-1">{tr.fileReady}: {fileName}</p>}
+                    {attachWarn && status === 'sending' && (
+                      <p className="text-yellow-400 text-xs mt-1 flex items-center gap-1">
+                        <AlertCircle size={11} /> {attachWarn}
+                      </p>
                     )}
                   </div>
 

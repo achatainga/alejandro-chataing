@@ -58,6 +58,7 @@ export type Translations = {
   chooseFile: string
   fileReady: string
   sendFailed: string
+  attachmentFailed: string
   fileTooLarge: string
   nameRequired: string
   poweredBy: string
@@ -129,7 +130,8 @@ export const t: Record<Lang, Translations> = {
     attachmentHint: '(PDF, DOC, DOCX, TXT, PNG, JPG — max 5 MB)',
     chooseFile:     'Choose file',
     fileReady:      'ready',
-    sendFailed:     'Send failed. Try WhatsApp or email directly.',
+    sendFailed:       'Send failed. Try WhatsApp or email directly.',
+    attachmentFailed: 'Attachment failed to upload — email sent without it.',
     fileTooLarge:   'File too large (max 5 MB)',
     nameRequired:   'Name and email are required.',
     poweredBy:      'Powered by EmailJS · No data stored on this site',
@@ -200,7 +202,8 @@ export const t: Record<Lang, Translations> = {
     attachmentHint: '(PDF, DOC, DOCX, TXT, PNG, JPG — máx 5 MB)',
     chooseFile:     'Elegir archivo',
     fileReady:      'listo',
-    sendFailed:     'Error al enviar. Intenta por WhatsApp o email directamente.',
+    sendFailed:       'Error al enviar. Intenta por WhatsApp o email directamente.',
+    attachmentFailed: 'El adjunto no se pudo subir — email enviado sin él.',
     fileTooLarge:   'Archivo muy grande (máx 5 MB)',
     nameRequired:   'Nombre y email son requeridos.',
     poweredBy:      'Enviado con EmailJS · No se almacenan datos en este sitio',

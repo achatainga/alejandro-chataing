@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { X } from 'lucide-react'
 import CanvasBackground from './components/CanvasBackground'
 import Navbar from './components/Navbar'
 import Hero from './components/Hero'
@@ -39,22 +40,25 @@ export default function App() {
   }, [lang])
 
   const [adminOpen, setAdminOpen] = useState(false)
+  const [adminAuthOpen, setAdminAuthOpen] = useState(false)
   const [hireMeOpen, setHireMeOpen] = useState(false)
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
 
   const logoClicksRef = useRef(0)
   const logoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  const openAdmin = useCallback(() => setAdminAuthOpen(true), [])
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.key === 'A') {
         e.preventDefault()
-        setAdminOpen((v) => !v)
+        openAdmin()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [openAdmin])
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -71,7 +75,7 @@ export default function App() {
     logoTimerRef.current = setTimeout(() => { logoClicksRef.current = 0 }, LOGO_CLICK_TIMEOUT_MS)
     if (logoClicksRef.current >= LOGO_CLICKS_REQUIRED) {
       logoClicksRef.current = 0
-      setAdminOpen(true)
+      openAdmin()
     }
   }, [])
 
@@ -103,6 +107,11 @@ export default function App() {
         <Footer data={cvData} tr={tr} onHireMe={() => setHireMeOpen(true)} />
       </main>
 
+      <AdminAuthModal
+        open={adminAuthOpen}
+        onClose={() => setAdminAuthOpen(false)}
+        onSuccess={() => { setAdminAuthOpen(false); setAdminOpen(true) }}
+      />
       <AdminPanel open={adminOpen} onClose={() => setAdminOpen(false)} data={cvData} onUpdate={setCVData} lang={lang} />
       <HireMeModal open={hireMeOpen} onClose={() => setHireMeOpen(false)} tr={tr} />
       <div className="print-cv-root">
@@ -178,4 +187,52 @@ function Footer({ data, tr, onHireMe }: { data: CVData; tr: Translations; onHire
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>
+}
+
+const ADMIN_PWD = import.meta.env.VITE_ADMIN_PASSWORD ?? ''
+
+function AdminAuthModal({ open, onClose, onSuccess }: {
+  open: boolean; onClose: () => void; onSuccess: () => void
+}) {
+  const [pwd, setPwd] = useState('')
+  const [err, setErr]  = useState(false)
+
+  const handleSubmit = useCallback((e: React.FormEvent) => {
+    e.preventDefault()
+    if (pwd === ADMIN_PWD) { setPwd(''); setErr(false); onSuccess() }
+    else { setErr(true); setPwd('') }
+  }, [pwd, onSuccess])
+
+  const handleClose = useCallback(() => { setPwd(''); setErr(false); onClose() }, [onClose])
+
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 no-print"
+      onClick={(e) => e.target === e.currentTarget && handleClose()}>
+      <div className="bg-cyber-surface border border-cyber-primary/40 rounded-2xl w-full max-w-xs overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-cyber-border">
+          <span className="text-cyber-primary font-mono text-sm">{'> admin_access'}</span>
+          <button type="button" onClick={handleClose} className="text-cyber-muted hover:text-cyber-text transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-3">
+          <input
+            type="password"
+            value={pwd}
+            onChange={(e) => { setPwd(e.target.value); setErr(false) }}
+            placeholder="Password"
+            autoFocus
+            className="w-full bg-cyber-bg border border-cyber-border rounded-lg px-3 py-2 text-sm text-cyber-text outline-none focus:border-cyber-primary/50 transition-colors font-mono"
+          />
+          {err && <p className="text-red-400 text-xs font-mono">Access denied.</p>}
+          <button type="submit"
+            className="w-full py-2 bg-cyber-primary text-cyber-bg text-sm font-semibold rounded-lg hover:bg-cyber-primary/90 transition-colors">
+            Enter
+          </button>
+        </form>
+      </div>
+    </div>
+  )
 }
