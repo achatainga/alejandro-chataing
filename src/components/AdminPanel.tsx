@@ -33,7 +33,7 @@ interface SavedSuggestion {
 
 interface Notification {
   id: string
-  source: 'email_form' | 'whatsapp_button'
+  source: 'email_form' | 'whatsapp_button' | 'ai_chat'
   name: string
   company: string
   email?: string
@@ -41,6 +41,13 @@ interface Notification {
   message: string
   attachmentUrl?: string
   attachmentName?: string
+  // ai_chat specific
+  firstQuestion?: string
+  summary?: string
+  messageCount?: number
+  sessionId?: string
+  visitor?: Record<string, string>
+  contact?: { name?: string; company?: string; email?: string; phone?: string } | null
   createdAt: { seconds: number } | null
   read: boolean
 }
@@ -91,8 +98,9 @@ export default function AdminPanel({ open, onClose, data, onUpdate, lang }: Prop
         const snap = await getDocs(q)
         return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Notification))
       }
-      const [hires, whatsapps] = await Promise.all([load('hire_me'), load('whatsapp')])
-      setNotifications([...hires, ...whatsapps].sort((a, b) =>
+      const [hires, whatsapps, aiChats] = await Promise.all([load('hire_me'), load('whatsapp'), load('ai_chat')])
+      const all = [...hires, ...whatsapps, ...aiChats.map((d) => ({ ...d, source: 'ai_chat' as const }))]
+      setNotifications(all.sort((a, b) =>
         (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0)
       ))
     } catch (e) {
@@ -107,7 +115,7 @@ export default function AdminPanel({ open, onClose, data, onUpdate, lang }: Prop
 
   const markRead = useCallback(async (n: Notification) => {
     if (n.read) return
-    const type = n.source === 'email_form' ? 'hire_me' : 'whatsapp'
+    const type = n.source === 'email_form' ? 'hire_me' : n.source === 'whatsapp_button' ? 'whatsapp' : 'ai_chat'
     await updateDoc(doc(db, 'notifications', type, 'items', n.id), { read: true })
     setNotifications((prev) => prev.map((x) => x.id === n.id ? { ...x, read: true } : x))
   }, [])
@@ -358,17 +366,34 @@ Return only the JSON object described above.`
                       className={`rounded-xl border p-4 cursor-pointer transition-colors ${
                         n.read
                           ? 'border-cyber-border bg-cyber-bg/40 opacity-60'
-                          : 'border-cyber-primary/40 bg-cyber-primary/5 hover:bg-cyber-primary/10'
+                          : n.source === 'ai_chat'
+                            ? 'border-cyber-secondary/40 bg-cyber-secondary/5 hover:bg-cyber-secondary/10'
+                            : 'border-cyber-primary/40 bg-cyber-primary/5 hover:bg-cyber-primary/10'
                       }`}
                     >
+                      {/* Header row */}
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-2">
-                          {n.source === 'email_form'
-                            ? <Mail size={13} className="text-cyber-primary flex-shrink-0" />
-                            : <MessageSquare size={13} className="text-cyber-accent flex-shrink-0" />
+                          {n.source === 'ai_chat'
+                            ? <Sparkles size={13} className="text-cyber-secondary flex-shrink-0" />
+                            : n.source === 'email_form'
+                              ? <Mail size={13} className="text-cyber-primary flex-shrink-0" />
+                              : <MessageSquare size={13} className="text-cyber-accent flex-shrink-0" />
                           }
-                          <span className="text-sm font-semibold text-cyber-text">{n.name || '(no name)'}</span>
-                          {n.company && <span className="text-xs text-cyber-muted">· {n.company}</span>}
+                          <span className="text-sm font-semibold text-cyber-text">
+                            {n.source === 'ai_chat'
+                              ? (n.contact?.name || 'AI Chat visitor')
+                              : (n.name || '(no name)')
+                            }
+                          </span>
+                          {(n.source !== 'ai_chat' && n.company) && (
+                            <span className="text-xs text-cyber-muted">· {n.company}</span>
+                          )}
+                          {n.source === 'ai_chat' && (
+                            <span className="text-[10px] px-1.5 py-0.5 bg-cyber-secondary/20 text-cyber-secondary rounded-full">
+                              {n.messageCount ?? 0} msgs
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
                           {n.read && <CheckCheck size={12} className="text-cyber-accent" />}
@@ -378,23 +403,78 @@ Return only the JSON object described above.`
                         </div>
                       </div>
 
-                      {(n.email || n.phone) && (
-                        <div className="flex gap-3 mt-1.5 text-xs text-cyber-muted">
-                          {n.email && <a href={`mailto:${n.email}`} className="hover:text-cyber-primary transition-colors" onClick={(e) => e.stopPropagation()}>{n.email}</a>}
-                          {n.phone && <a href={`https://wa.me/${n.phone.replace(/\D/g,'')}`} target="_blank" rel="noreferrer" className="hover:text-cyber-accent transition-colors" onClick={(e) => e.stopPropagation()}>{n.phone}</a>}
+                      {/* AI Chat specific info */}
+                      {n.source === 'ai_chat' && (
+                        <div className="mt-2 space-y-1.5">
+                          {n.firstQuestion && (
+                            <p className="text-xs text-cyber-text italic">
+                              💬 &ldquo;{n.firstQuestion.slice(0, 120)}{n.firstQuestion.length > 120 ? '…' : ''}&rdquo;
+                            </p>
+                          )}
+                          {/* Visitor intel */}
+                          {n.visitor && (
+                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-cyber-muted font-mono">
+                              {n.visitor.country && (
+                                <span>🌍 {[n.visitor.city, n.visitor.region, n.visitor.country].filter(Boolean).join(', ')}</span>
+                              )}
+                              {n.visitor.timezone && !n.visitor.country && (
+                                <span>🕐 {n.visitor.timezone}</span>
+                              )}
+                              {n.visitor.language && <span>🗣 {n.visitor.language}</span>}
+                              {n.visitor.device && <span>📱 {n.visitor.device}</span>}
+                              {n.visitor.referrer && n.visitor.referrer !== 'direct' && (
+                                <span>🔗 {n.visitor.referrer.slice(0, 40)}</span>
+                              )}
+                              {n.visitor.isp && <span>🌐 {n.visitor.isp.slice(0, 30)}</span>}
+                            </div>
+                          )}
+                          {/* Contact info if submitted */}
+                          {n.contact?.email && (
+                            <div className="flex gap-3 text-xs text-cyber-muted mt-1">
+                              <a href={`mailto:${n.contact.email}`} className="hover:text-cyber-primary transition-colors" onClick={(e) => e.stopPropagation()}>
+                                ✉ {n.contact.email}
+                              </a>
+                              {n.contact.phone && (
+                                <a href={`https://wa.me/${n.contact.phone.replace(/\D/g,'')}`} target="_blank" rel="noreferrer" className="hover:text-cyber-accent transition-colors" onClick={(e) => e.stopPropagation()}>
+                                  💬 {n.contact.phone}
+                                </a>
+                              )}
+                            </div>
+                          )}
+                          {/* Conversation summary */}
+                          {n.summary && (
+                            <details className="mt-1">
+                              <summary className="text-[10px] text-cyber-muted cursor-pointer hover:text-cyber-text">
+                                View conversation ▸
+                              </summary>
+                              <pre className="mt-1 text-[10px] text-cyber-muted whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
+                                {n.summary}
+                              </pre>
+                            </details>
+                          )}
                         </div>
                       )}
 
-                      {n.message && (
-                        <p className="mt-2 text-xs text-cyber-muted leading-relaxed line-clamp-3">{n.message}</p>
-                      )}
-
-                      {n.attachmentUrl && (
-                        <a href={n.attachmentUrl} target="_blank" rel="noreferrer"
-                          className="inline-flex items-center gap-1 mt-2 text-xs text-cyber-primary hover:underline"
-                          onClick={(e) => e.stopPropagation()}>
-                          📎 {n.attachmentName || 'attachment'}
-                        </a>
+                      {/* email_form / whatsapp fields */}
+                      {n.source !== 'ai_chat' && (
+                        <>
+                          {(n.email || n.phone) && (
+                            <div className="flex gap-3 mt-1.5 text-xs text-cyber-muted">
+                              {n.email && <a href={`mailto:${n.email}`} className="hover:text-cyber-primary transition-colors" onClick={(e) => e.stopPropagation()}>{n.email}</a>}
+                              {n.phone && <a href={`https://wa.me/${n.phone.replace(/\D/g,'')}`} target="_blank" rel="noreferrer" className="hover:text-cyber-accent transition-colors" onClick={(e) => e.stopPropagation()}>{n.phone}</a>}
+                            </div>
+                          )}
+                          {n.message && (
+                            <p className="mt-2 text-xs text-cyber-muted leading-relaxed line-clamp-3">{n.message}</p>
+                          )}
+                          {n.attachmentUrl && (
+                            <a href={n.attachmentUrl} target="_blank" rel="noreferrer"
+                              className="inline-flex items-center gap-1 mt-2 text-xs text-cyber-primary hover:underline"
+                              onClick={(e) => e.stopPropagation()}>
+                              📎 {n.attachmentName || 'attachment'}
+                            </a>
+                          )}
+                        </>
                       )}
                     </div>
                   ))}

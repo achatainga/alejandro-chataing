@@ -134,8 +134,39 @@ export default function AIChatWidget({ cvData, onOpenHireMe, forceOpen, initQues
   const limitsRef       = useRef<ReturnType<typeof resolveSessionLimits> | null>(null)
   const timestampsRef   = useRef<number[]>([])
   const savedCountRef   = useRef(0)
+  const notifiedRef     = useRef(false)
+  const visitorRef      = useRef<Record<string, string>>({})
   const systemPromptRef = useRef(buildSystemPrompt(cvData))
   const bottomRef       = useRef<HTMLDivElement>(null)
+
+  // ─── Collect visitor context on first open ────────────────────────────────
+
+  useEffect(() => {
+    if (!open || Object.keys(visitorRef.current).length > 0) return
+    const info: Record<string, string> = {
+      timezone:  Intl.DateTimeFormat().resolvedOptions().timeZone,
+      language:  navigator.language,
+      screen:    `${screen.width}x${screen.height}`,
+      device:    /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
+      referrer:  document.referrer || 'direct',
+      userAgent: navigator.userAgent.slice(0, 120),
+    }
+    visitorRef.current = info
+    // Enrich with IP geolocation (fire-and-forget, free, no key)
+    fetch('https://ip-api.com/json?fields=country,regionName,city,isp,query')
+      .then((r) => r.json())
+      .then((d) => {
+        visitorRef.current = {
+          ...visitorRef.current,
+          ip:      d.query   ?? '',
+          city:    d.city    ?? '',
+          region:  d.regionName ?? '',
+          country: d.country ?? '',
+          isp:     d.isp     ?? '',
+        }
+      })
+      .catch(() => {})
+  }, [open])
 
   // ─── Init session on open ──────────────────────────────────────────────────
 
@@ -174,15 +205,13 @@ export default function AIChatWidget({ cvData, onOpenHireMe, forceOpen, initQues
         updatedAt:    serverTimestamp(),
       }, { merge: true })
 
-      if (final && msgs.length >= 3) {
-        await addDoc(collection(db, 'notifications', 'ai_chat', 'items'), {
-          sessionId:    sessionIdRef.current,
-          summary,
-          messageCount: msgs.length,
-          contact:      contact.email ? contact : null,
-          read:         false,
-          createdAt:    serverTimestamp(),
-        })
+      // Update existing ai_chat notification with latest contact info if available
+      if (contact.email) {
+        await setDoc(
+          doc(db, 'notifications', 'ai_chat', 'items', sessionIdRef.current),
+          { contact, messageCount: msgs.length, summary, visitor: visitorRef.current, updatedAt: serverTimestamp() },
+          { merge: true }
+        )
       }
     } catch { /* non-critical */ }
   }, [contact])
@@ -255,6 +284,28 @@ export default function AIChatWidget({ cvData, onOpenHireMe, forceOpen, initQues
       const final = [...next, assistantMsg]
       setMessages(final)
       await incrementMessages(2)
+
+      // First-message notification — fire once per session
+      if (!notifiedRef.current) {
+        notifiedRef.current = true
+        const firstQ = next[0]?.text ?? ''
+        const summary = final
+          .map((m) => `${m.role === 'user' ? 'Employer' : 'AI'}: ${m.text.slice(0, 150)}`)
+          .join('\n')
+        // Small delay so IP geolocation has time to resolve
+        setTimeout(() => {
+          addDoc(collection(db, 'notifications', 'ai_chat', 'items'), {
+            sessionId:     sessionIdRef.current,
+            firstQuestion: firstQ,
+            summary,
+            messageCount:  final.length,
+            visitor:       visitorRef.current,
+            contact:       null,
+            read:          false,
+            createdAt:     serverTimestamp(),
+          }).catch(() => {})
+        }, 1500)
+      }
 
       // Show contact prompt after 4+ exchanges
       if (final.filter((m) => m.role === 'user').length >= 4 && !showContact) {
